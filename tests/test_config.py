@@ -18,44 +18,39 @@ from takopi_party.config import (
 class TestMakeProjectKey:
     """Tests for _make_project_key function."""
 
-    def test_personal_topic_simple_name(self):
-        """Personal topics get party-user- prefix."""
-        result = _make_project_key("John", is_personal=True)
-        assert result == "party-user-john"
-
-    def test_project_topic_simple_name(self):
-        """Project topics get party- prefix."""
-        result = _make_project_key("MyProject", is_personal=False)
+    def test_simple_name(self):
+        """Simple names get party- prefix."""
+        result = _make_project_key("MyProject")
         assert result == "party-myproject"
 
     def test_name_with_spaces(self):
         """Spaces are converted to hyphens."""
-        result = _make_project_key("John Doe", is_personal=True)
-        assert result == "party-user-john-doe"
+        result = _make_project_key("My Project")
+        assert result == "party-my-project"
 
     def test_name_with_underscores(self):
         """Underscores are converted to hyphens."""
-        result = _make_project_key("my_project", is_personal=False)
+        result = _make_project_key("my_project")
         assert result == "party-my-project"
 
     def test_name_with_special_chars(self):
         """Special characters are removed."""
-        result = _make_project_key("Project@#$123!", is_personal=False)
+        result = _make_project_key("Project@#$123!")
         assert result == "party-project123"
 
     def test_consecutive_hyphens_collapsed(self):
         """Multiple consecutive hyphens are collapsed to one."""
-        result = _make_project_key("a   b", is_personal=False)
+        result = _make_project_key("a   b")
         assert result == "party-a-b"
 
     def test_leading_trailing_hyphens_stripped(self):
         """Leading and trailing hyphens are stripped."""
-        result = _make_project_key("-test-", is_personal=False)
+        result = _make_project_key("-test-")
         assert result == "party-test"
 
     def test_unicode_name(self):
         """Unicode characters are handled."""
-        result = _make_project_key("Test123", is_personal=False)
+        result = _make_project_key("Test123")
         assert result == "party-test123"
 
 
@@ -64,8 +59,8 @@ class TestGetPartyProjectKey:
 
     def test_returns_same_as_make(self):
         """get_party_project_key returns the same as _make_project_key."""
-        assert get_party_project_key("Test", True) == _make_project_key("Test", True)
-        assert get_party_project_key("Test", False) == _make_project_key("Test", False)
+        assert get_party_project_key("Test") == _make_project_key("Test")
+        assert get_party_project_key("My Project") == _make_project_key("My Project")
 
 
 class TestAddPartyProject:
@@ -78,9 +73,7 @@ class TestAddPartyProject:
 
         workspace_path = tmp_path / "workspace"
 
-        project_key = add_party_project(
-            config_path, workspace_path, "TestProject", is_personal=False
-        )
+        project_key = add_party_project(config_path, workspace_path, "TestProject")
 
         assert project_key == "party-testproject"
 
@@ -107,9 +100,7 @@ path = "/some/path"
 
         workspace_path = tmp_path / "workspace"
 
-        project_key = add_party_project(
-            config_path, workspace_path, "NewProject", is_personal=False
-        )
+        project_key = add_party_project(config_path, workspace_path, "NewProject")
 
         assert project_key == "party-newproject"
 
@@ -119,22 +110,6 @@ path = "/some/path"
         # Both projects should exist
         assert "existing" in config["projects"]
         assert "party-newproject" in config["projects"]
-
-    def test_adds_personal_project(self, tmp_path: Path):
-        """Adds personal project with correct prefix."""
-        config_path = tmp_path / "takopi.toml"
-        config_path.write_text('default_engine = "claude"\n')
-
-        workspace_path = tmp_path / "workspace"
-
-        project_key = add_party_project(config_path, workspace_path, "John Doe", is_personal=True)
-
-        assert project_key == "party-user-john-doe"
-
-        with config_path.open("rb") as f:
-            config = tomli.load(f)
-
-        assert "party-user-john-doe" in config["projects"]
 
     def test_raises_on_duplicate_key(self, tmp_path: Path):
         """Raises ValueError if project key already exists."""
@@ -149,7 +124,7 @@ path = "/existing"
         workspace_path = tmp_path / "workspace"
 
         with pytest.raises(ValueError, match="already exists"):
-            add_party_project(config_path, workspace_path, "Test", is_personal=False)
+            add_party_project(config_path, workspace_path, "Test")
 
     def test_raises_on_missing_config(self, tmp_path: Path):
         """Raises FileNotFoundError if config doesn't exist."""
@@ -157,7 +132,7 @@ path = "/existing"
         workspace_path = tmp_path / "workspace"
 
         with pytest.raises(FileNotFoundError):
-            add_party_project(config_path, workspace_path, "Test", is_personal=False)
+            add_party_project(config_path, workspace_path, "Test")
 
 
 class TestRemovePartyProject:
@@ -176,7 +151,7 @@ path = "/other/path"
 """
         )
 
-        result = remove_party_project(config_path, "Test", is_personal=False)
+        result = remove_party_project(config_path, "Test")
 
         assert result is True
 
@@ -185,25 +160,6 @@ path = "/other/path"
 
         assert "party-test" not in config["projects"]
         assert "other" in config["projects"]
-
-    def test_removes_personal_project(self, tmp_path: Path):
-        """Removes personal project with correct key."""
-        config_path = tmp_path / "takopi.toml"
-        config_path.write_text(
-            """
-[projects.party-user-john]
-path = "/some/path"
-"""
-        )
-
-        result = remove_party_project(config_path, "John", is_personal=True)
-
-        assert result is True
-
-        with config_path.open("rb") as f:
-            config = tomli.load(f)
-
-        assert "party-user-john" not in config["projects"]
 
     def test_returns_false_if_not_found(self, tmp_path: Path):
         """Returns False if project key doesn't exist."""
@@ -215,7 +171,7 @@ path = "/some/path"
 """
         )
 
-        result = remove_party_project(config_path, "Test", is_personal=False)
+        result = remove_party_project(config_path, "Test")
 
         assert result is False
 
@@ -224,7 +180,7 @@ path = "/some/path"
         config_path = tmp_path / "takopi.toml"
         config_path.write_text('default_engine = "claude"\n')
 
-        result = remove_party_project(config_path, "Test", is_personal=False)
+        result = remove_party_project(config_path, "Test")
 
         assert result is False
 
@@ -232,6 +188,6 @@ path = "/some/path"
         """Returns False if config file doesn't exist."""
         config_path = tmp_path / "nonexistent.toml"
 
-        result = remove_party_project(config_path, "Test", is_personal=False)
+        result = remove_party_project(config_path, "Test")
 
         assert result is False

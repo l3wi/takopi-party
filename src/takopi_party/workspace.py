@@ -38,10 +38,6 @@ class PartyWorkspaceManager:
         """Get the base path for all workspaces."""
         return self._base
 
-    def personal_workspace_path(self, user_id: int) -> Path:
-        """Get the workspace path for a user's personal topic."""
-        return self._base / str(user_id)
-
     def project_workspace_path(self, project_name: str) -> Path:
         """Get the workspace path for a named project."""
         sanitized = _sanitize_project_name(project_name)

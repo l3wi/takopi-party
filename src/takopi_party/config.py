@@ -25,10 +25,9 @@ def _save_config(config_path: Path, config: dict[str, Any]) -> None:
         tomli_w.dump(config, f)
 
 
-def _make_project_key(name: str, is_personal: bool) -> str:
+def _make_project_key(name: str) -> str:
     """Generate a unique project key for takopi config.
 
-    Personal topics use 'party-user-{name}', project topics use 'party-{name}'.
     Names are sanitized to be valid TOML keys (lowercase, hyphens).
     """
     # Sanitize name for TOML key
@@ -40,8 +39,6 @@ def _make_project_key(name: str, is_personal: bool) -> str:
         sanitized = sanitized.replace("--", "-")
     sanitized = sanitized.strip("-")
 
-    if is_personal:
-        return f"party-user-{sanitized}"
     return f"party-{sanitized}"
 
 
@@ -49,7 +46,6 @@ def add_party_project(
     config_path: Path,
     workspace_path: Path,
     name: str,
-    is_personal: bool,
 ) -> str:
     """Add a party project entry to takopi.toml.
 
@@ -57,7 +53,6 @@ def add_party_project(
         config_path: Path to takopi.toml
         workspace_path: Absolute path to the workspace directory
         name: Human-readable topic name
-        is_personal: Whether this is a personal topic
 
     Returns:
         The project key that was added (for use with /ctx set)
@@ -72,7 +67,7 @@ def add_party_project(
     if "projects" not in config:
         config["projects"] = {}
 
-    project_key = _make_project_key(name, is_personal)
+    project_key = _make_project_key(name)
 
     # Check for collision
     if project_key in config["projects"]:
@@ -89,13 +84,12 @@ def add_party_project(
     return project_key
 
 
-def remove_party_project(config_path: Path, name: str, is_personal: bool) -> bool:
+def remove_party_project(config_path: Path, name: str) -> bool:
     """Remove a party project entry from takopi.toml.
 
     Args:
         config_path: Path to takopi.toml
         name: Human-readable topic name
-        is_personal: Whether this is a personal topic
 
     Returns:
         True if the project was removed, False if not found
@@ -108,7 +102,7 @@ def remove_party_project(config_path: Path, name: str, is_personal: bool) -> boo
     if "projects" not in config:
         return False
 
-    project_key = _make_project_key(name, is_personal)
+    project_key = _make_project_key(name)
 
     if project_key not in config["projects"]:
         return False
@@ -118,12 +112,12 @@ def remove_party_project(config_path: Path, name: str, is_personal: bool) -> boo
     return True
 
 
-def get_party_project_key(name: str, is_personal: bool) -> str:
+def get_party_project_key(name: str) -> str:
     """Get the project key for a party topic.
 
     This is useful for generating the /ctx set command hint.
     """
-    return _make_project_key(name, is_personal)
+    return _make_project_key(name)
 
 
 # Topic state binding (writes directly to telegram_topics_state.json)

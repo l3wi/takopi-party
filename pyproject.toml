@@ -1,6 +1,6 @@
 [project]
 name = "takopi-party"
-version = "0.2.0"
+version = "0.3.0"
 description = "Party mode plugin for Takopi - multi-user private topics"
 readme = "README.md"
 license = { file = "LICENSE" }

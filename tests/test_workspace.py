@@ -69,12 +69,6 @@ class TestPartyWorkspaceManager:
         """Test that base_path is correct."""
         assert manager.base_path == workspace_base
 
-    def test_personal_workspace_path(self, manager: PartyWorkspaceManager) -> None:
-        """Test personal workspace path generation."""
-        path = manager.personal_workspace_path(12345)
-        assert path.name == "12345"
-        assert path.parent == manager.base_path
-
     def test_project_workspace_path(self, manager: PartyWorkspaceManager) -> None:
         """Test project workspace path generation."""
         path = manager.project_workspace_path("My Project")
@@ -83,7 +77,7 @@ class TestPartyWorkspaceManager:
 
     def test_workspace_exists(self, manager: PartyWorkspaceManager) -> None:
         """Test workspace existence check."""
-        path = manager.personal_workspace_path(12345)
+        path = manager.project_workspace_path("TestProject")
         assert manager.workspace_exists(path) is False
 
         path.mkdir(parents=True)
@@ -91,8 +85,8 @@ class TestPartyWorkspaceManager:
 
     def test_create_workspace_success(self, manager: PartyWorkspaceManager) -> None:
         """Test successful workspace creation."""
-        path = manager.personal_workspace_path(12345)
-        result = manager.create_workspace(path, "Alice", 12345)
+        path = manager.project_workspace_path("TestProject")
+        result = manager.create_workspace(path, "TestProject", 12345)
 
         assert result == path
         assert path.exists()
@@ -106,7 +100,7 @@ class TestPartyWorkspaceManager:
             capture_output=True,
             text=True,
         )
-        assert proc.stdout.strip() == "Alice"
+        assert proc.stdout.strip() == "TestProject"
 
         proc = subprocess.run(
             ["git", "config", "user.email"],
@@ -118,16 +112,16 @@ class TestPartyWorkspaceManager:
 
     def test_create_workspace_already_exists(self, manager: PartyWorkspaceManager) -> None:
         """Test that creating workspace twice raises error."""
-        path = manager.personal_workspace_path(12345)
-        manager.create_workspace(path, "Alice", 12345)
+        path = manager.project_workspace_path("TestProject")
+        manager.create_workspace(path, "TestProject", 12345)
 
         with pytest.raises(WorkspaceError, match="already exists"):
-            manager.create_workspace(path, "Alice", 12345)
+            manager.create_workspace(path, "TestProject", 12345)
 
     def test_create_workspace_has_initial_commit(self, manager: PartyWorkspaceManager) -> None:
         """Test that workspace has an initial commit."""
-        path = manager.personal_workspace_path(12345)
-        manager.create_workspace(path, "Alice", 12345)
+        path = manager.project_workspace_path("TestProject")
+        manager.create_workspace(path, "TestProject", 12345)
 
         proc = subprocess.run(
             ["git", "log", "--oneline"],
@@ -139,8 +133,8 @@ class TestPartyWorkspaceManager:
 
     def test_archive_workspace(self, manager: PartyWorkspaceManager) -> None:
         """Test archiving a workspace."""
-        path = manager.personal_workspace_path(12345)
-        manager.create_workspace(path, "Alice", 12345)
+        path = manager.project_workspace_path("TestProject")
+        manager.create_workspace(path, "TestProject", 12345)
 
         archive_path = manager.archive_workspace(path)
 
@@ -148,18 +142,18 @@ class TestPartyWorkspaceManager:
         assert archive_path.exists()
         assert not path.exists()
         assert archive_path.parent.name == "archived"
-        assert "12345_" in archive_path.name
+        assert "testproject_" in archive_path.name
 
     def test_archive_nonexistent_workspace(self, manager: PartyWorkspaceManager) -> None:
         """Test archiving a workspace that doesn't exist."""
-        path = manager.personal_workspace_path(99999)
+        path = manager.project_workspace_path("Nonexistent")
         result = manager.archive_workspace(path)
         assert result is None
 
     def test_delete_workspace(self, manager: PartyWorkspaceManager) -> None:
         """Test deleting a workspace."""
-        path = manager.personal_workspace_path(12345)
-        manager.create_workspace(path, "Alice", 12345)
+        path = manager.project_workspace_path("TestProject")
+        manager.create_workspace(path, "TestProject", 12345)
 
         result = manager.delete_workspace(path)
 
@@ -168,14 +162,14 @@ class TestPartyWorkspaceManager:
 
     def test_delete_nonexistent_workspace(self, manager: PartyWorkspaceManager) -> None:
         """Test deleting a workspace that doesn't exist."""
-        path = manager.personal_workspace_path(99999)
+        path = manager.project_workspace_path("Nonexistent")
         result = manager.delete_workspace(path)
         assert result is False
 
     def test_cleanup_workspace_archive(self, manager: PartyWorkspaceManager) -> None:
         """Test cleanup with archive=True."""
-        path = manager.personal_workspace_path(12345)
-        manager.create_workspace(path, "Alice", 12345)
+        path = manager.project_workspace_path("TestProject")
+        manager.create_workspace(path, "TestProject", 12345)
 
         archive_path = manager.cleanup_workspace(path, archive=True)
 
@@ -185,8 +179,8 @@ class TestPartyWorkspaceManager:
 
     def test_cleanup_workspace_delete(self, manager: PartyWorkspaceManager) -> None:
         """Test cleanup with archive=False."""
-        path = manager.personal_workspace_path(12345)
-        manager.create_workspace(path, "Alice", 12345)
+        path = manager.project_workspace_path("TestProject")
+        manager.create_workspace(path, "TestProject", 12345)
 
         result = manager.cleanup_workspace(path, archive=False)
 
@@ -203,13 +197,13 @@ class TestPartyWorkspaceManager:
 
     def test_multiple_workspaces(self, manager: PartyWorkspaceManager) -> None:
         """Test creating multiple workspaces."""
-        path1 = manager.personal_workspace_path(12345)
-        path2 = manager.project_workspace_path("ProjectA")
-        path3 = manager.project_workspace_path("ProjectB")
+        path1 = manager.project_workspace_path("ProjectA")
+        path2 = manager.project_workspace_path("ProjectB")
+        path3 = manager.project_workspace_path("ProjectC")
 
-        manager.create_workspace(path1, "Alice", 12345)
-        manager.create_workspace(path2, "ProjectA", 12345)
-        manager.create_workspace(path3, "ProjectB", 12345)
+        manager.create_workspace(path1, "ProjectA", 12345)
+        manager.create_workspace(path2, "ProjectB", 12345)
+        manager.create_workspace(path3, "ProjectC", 12345)
 
         assert path1.exists()
         assert path2.exists()

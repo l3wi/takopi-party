@@ -11,7 +11,7 @@ from pathlib import Path
 import anyio
 import msgspec
 
-STATE_VERSION = 2
+STATE_VERSION = 4
 STATE_FILENAME = "telegram_party_state.json"
 
 
@@ -21,12 +21,10 @@ class PartyTopic:
 
     thread_id: int  # Primary key
     owner_id: int  # User who created/owns it
-    owner_username: str | None
     name: str  # Topic display name
     workspace_path: str
-    is_personal: bool  # True = personal topic, False = named project
+    allowed_users: frozenset[int]  # User IDs allowed to use this topic
     registered_at: str
-    allowed_users: frozenset[int]
 
 
 class _PartyTopicState(msgspec.Struct, forbid_unknown_fields=False):
@@ -34,12 +32,10 @@ class _PartyTopicState(msgspec.Struct, forbid_unknown_fields=False):
 
     thread_id: int
     owner_id: int
-    owner_username: str | None
     name: str
     workspace_path: str
-    is_personal: bool
+    allowed_users: list[int]  # Stored as list, converted to frozenset
     registered_at: str
-    allowed_users: list[int] = msgspec.field(default_factory=list)
 
 
 class _PartyState(msgspec.Struct, forbid_unknown_fields=False):
@@ -65,12 +61,10 @@ def _topic_from_state(state: _PartyTopicState) -> PartyTopic:
     return PartyTopic(
         thread_id=state.thread_id,
         owner_id=state.owner_id,
-        owner_username=state.owner_username,
         name=state.name,
         workspace_path=state.workspace_path,
-        is_personal=state.is_personal,
-        registered_at=state.registered_at,
         allowed_users=frozenset(state.allowed_users),
+        registered_at=state.registered_at,
     )
 
 
@@ -79,12 +73,10 @@ def _topic_to_state(topic: PartyTopic) -> _PartyTopicState:
     return _PartyTopicState(
         thread_id=topic.thread_id,
         owner_id=topic.owner_id,
-        owner_username=topic.owner_username,
         name=topic.name,
         workspace_path=topic.workspace_path,
-        is_personal=topic.is_personal,
-        registered_at=topic.registered_at,
         allowed_users=sorted(topic.allowed_users),
+        registered_at=topic.registered_at,
     )
 
 
@@ -116,14 +108,14 @@ class PartyStateStore:
                 return None
             return _topic_from_state(state)
 
-    async def get_personal_topic(self, user_id: int) -> PartyTopic | None:
-        """Get a user's personal topic (if they have one)."""
+    async def can_use_topic(self, thread_id: int, user_id: int) -> bool:
+        """Check if a user can use a topic (owner or allowed)."""
         async with self._lock:
             self._reload_locked_if_needed()
-            for state in self._state.topics.values():
-                if state.owner_id == user_id and state.is_personal:
-                    return _topic_from_state(state)
-            return None
+            state = self._state.topics.get(_topic_key(thread_id))
+            if state is None:
+                return False
+            return state.owner_id == user_id or user_id in state.allowed_users
 
     async def get_topics_by_owner(self, user_id: int) -> list[PartyTopic]:
         """Get all topics owned by a user."""
@@ -172,10 +164,8 @@ class PartyStateStore:
         chat_id: int,
         thread_id: int,
         owner_id: int,
-        owner_username: str | None,
         name: str,
         workspace_path: str,
-        is_personal: bool,
     ) -> PartyTopic:
         """Register a new party topic."""
         async with self._lock:
@@ -192,17 +182,61 @@ class PartyStateStore:
             topic = PartyTopic(
                 thread_id=thread_id,
                 owner_id=owner_id,
-                owner_username=owner_username,
                 name=name,
                 workspace_path=workspace_path,
-                is_personal=is_personal,
-                registered_at=datetime.now(UTC).isoformat(),
                 allowed_users=frozenset(),
+                registered_at=datetime.now(UTC).isoformat(),
             )
 
             self._state.topics[_topic_key(thread_id)] = _topic_to_state(topic)
             self._save_locked()
             return topic
+
+    async def allow_user(self, thread_id: int, user_id: int) -> bool:
+        """Allow a user to use a topic. Returns True if added, False if already allowed."""
+        async with self._lock:
+            self._reload_locked_if_needed()
+            key = _topic_key(thread_id)
+            state = self._state.topics.get(key)
+            if state is None:
+                raise ValueError(f"Topic {thread_id} not found")
+            if user_id in state.allowed_users or user_id == state.owner_id:
+                return False
+            # Create new state with updated allowed_users
+            new_allowed = list(state.allowed_users) + [user_id]
+            self._state.topics[key] = _PartyTopicState(
+                thread_id=state.thread_id,
+                owner_id=state.owner_id,
+                name=state.name,
+                workspace_path=state.workspace_path,
+                allowed_users=new_allowed,
+                registered_at=state.registered_at,
+            )
+            self._save_locked()
+            return True
+
+    async def revoke_user(self, thread_id: int, user_id: int) -> bool:
+        """Revoke a user's access to a topic. Returns True if removed, False if not found."""
+        async with self._lock:
+            self._reload_locked_if_needed()
+            key = _topic_key(thread_id)
+            state = self._state.topics.get(key)
+            if state is None:
+                raise ValueError(f"Topic {thread_id} not found")
+            if user_id not in state.allowed_users:
+                return False
+            # Create new state with updated allowed_users
+            new_allowed = [uid for uid in state.allowed_users if uid != user_id]
+            self._state.topics[key] = _PartyTopicState(
+                thread_id=state.thread_id,
+                owner_id=state.owner_id,
+                name=state.name,
+                workspace_path=state.workspace_path,
+                allowed_users=new_allowed,
+                registered_at=state.registered_at,
+            )
+            self._save_locked()
+            return True
 
     async def unregister_topic(self, thread_id: int) -> PartyTopic | None:
         """Unregister a topic, returns the topic if found."""
@@ -215,95 +249,11 @@ class PartyStateStore:
             self._save_locked()
             return _topic_from_state(state)
 
-    async def allow_user(self, thread_id: int, guest_id: int) -> bool:
-        """Allow a guest user in a topic. Returns True if successful."""
-        async with self._lock:
-            self._reload_locked_if_needed()
-            key = _topic_key(thread_id)
-            state = self._state.topics.get(key)
-            if state is None:
-                return False
-
-            if guest_id in state.allowed_users:
-                return True  # Already allowed
-
-            topic = _topic_from_state(state)
-            updated = PartyTopic(
-                thread_id=topic.thread_id,
-                owner_id=topic.owner_id,
-                owner_username=topic.owner_username,
-                name=topic.name,
-                workspace_path=topic.workspace_path,
-                is_personal=topic.is_personal,
-                registered_at=topic.registered_at,
-                allowed_users=topic.allowed_users | {guest_id},
-            )
-
-            self._state.topics[key] = _topic_to_state(updated)
-            self._save_locked()
-            return True
-
-    async def revoke_user(self, thread_id: int, guest_id: int) -> bool:
-        """Revoke a guest user from a topic. Returns True if successful."""
-        async with self._lock:
-            self._reload_locked_if_needed()
-            key = _topic_key(thread_id)
-            state = self._state.topics.get(key)
-            if state is None:
-                return False
-
-            if guest_id not in state.allowed_users:
-                return True  # Already not allowed
-
-            topic = _topic_from_state(state)
-            updated = PartyTopic(
-                thread_id=topic.thread_id,
-                owner_id=topic.owner_id,
-                owner_username=topic.owner_username,
-                name=topic.name,
-                workspace_path=topic.workspace_path,
-                is_personal=topic.is_personal,
-                registered_at=topic.registered_at,
-                allowed_users=topic.allowed_users - {guest_id},
-            )
-
-            self._state.topics[key] = _topic_to_state(updated)
-            self._save_locked()
-            return True
-
     async def list_topics(self) -> list[PartyTopic]:
         """List all registered party topics."""
         async with self._lock:
             self._reload_locked_if_needed()
             return [_topic_from_state(state) for state in self._state.topics.values()]
-
-    async def update_owner_username(self, owner_id: int, username: str | None) -> int:
-        """Update owner username across all topics they own.
-
-        Returns count of topics updated.
-        """
-        async with self._lock:
-            self._reload_locked_if_needed()
-            count = 0
-            for key, state in list(self._state.topics.items()):
-                if state.owner_id == owner_id and state.owner_username != username:
-                    topic = _topic_from_state(state)
-                    updated = PartyTopic(
-                        thread_id=topic.thread_id,
-                        owner_id=topic.owner_id,
-                        owner_username=username,
-                        name=topic.name,
-                        workspace_path=topic.workspace_path,
-                        is_personal=topic.is_personal,
-                        registered_at=topic.registered_at,
-                        allowed_users=topic.allowed_users,
-                    )
-                    self._state.topics[key] = _topic_to_state(updated)
-                    count += 1
-
-            if count > 0:
-                self._save_locked()
-            return count
 
     # --- Private methods ---
 

@@ -24,41 +24,21 @@ def store(state_path: Path) -> PartyStateStore:
 class TestPartyStateStore:
     """Tests for PartyStateStore."""
 
-    async def test_register_personal_topic(self, store: PartyStateStore) -> None:
-        """Test registering a personal topic."""
+    async def test_register_topic(self, store: PartyStateStore) -> None:
+        """Test registering a topic."""
         topic = await store.register_topic(
             chat_id=12345,
             thread_id=100,
             owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
+            name="MyProject",
+            workspace_path="/party/my-project",
         )
 
         assert topic.thread_id == 100
         assert topic.owner_id == 1001
-        assert topic.owner_username == "alice"
-        assert topic.name == "Alice"
-        assert topic.workspace_path == "/party/1001"
-        assert topic.is_personal is True
-        assert topic.allowed_users == frozenset()
-
-    async def test_register_project_topic(self, store: PartyStateStore) -> None:
-        """Test registering a project topic."""
-        topic = await store.register_topic(
-            chat_id=12345,
-            thread_id=200,
-            owner_id=1001,
-            owner_username="alice",
-            name="MyProject",
-            workspace_path="/party/my-project",
-            is_personal=False,
-        )
-
-        assert topic.thread_id == 200
         assert topic.name == "MyProject"
-        assert topic.is_personal is False
+        assert topic.workspace_path == "/party/my-project"
+        assert topic.allowed_users == frozenset()
 
     async def test_get_topic_by_thread_id(self, store: PartyStateStore) -> None:
         """Test retrieving a topic by thread_id."""
@@ -66,15 +46,13 @@ class TestPartyStateStore:
             chat_id=12345,
             thread_id=100,
             owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
+            name="MyProject",
+            workspace_path="/party/my-project",
         )
 
         topic = await store.get_topic(100)
         assert topic is not None
-        assert topic.name == "Alice"
+        assert topic.name == "MyProject"
 
         # Non-existent topic returns None
         topic = await store.get_topic(999)
@@ -86,10 +64,8 @@ class TestPartyStateStore:
             chat_id=12345,
             thread_id=100,
             owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
+            name="MyProject",
+            workspace_path="/party/my-project",
         )
 
         # Correct chat_id
@@ -104,77 +80,61 @@ class TestPartyStateStore:
         topic = await store.get_topic_by_thread(12345, None)
         assert topic is None
 
-    async def test_get_personal_topic(self, store: PartyStateStore) -> None:
-        """Test retrieving a user's personal topic."""
-        # Register personal topic
+    async def test_can_use_topic(self, store: PartyStateStore) -> None:
+        """Test checking if a user can use a topic."""
         await store.register_topic(
             chat_id=12345,
             thread_id=100,
             owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
-        )
-
-        # Register project topic for same user
-        await store.register_topic(
-            chat_id=12345,
-            thread_id=200,
-            owner_id=1001,
-            owner_username="alice",
             name="MyProject",
             workspace_path="/party/my-project",
-            is_personal=False,
         )
 
-        personal = await store.get_personal_topic(1001)
-        assert personal is not None
-        assert personal.is_personal is True
-        assert personal.name == "Alice"
+        # Owner can use
+        assert await store.can_use_topic(100, 1001) is True
 
-        # User without personal topic
-        personal = await store.get_personal_topic(9999)
-        assert personal is None
+        # Non-owner cannot use initially
+        assert await store.can_use_topic(100, 2002) is False
+
+        # Allow a user
+        await store.allow_user(100, 2002)
+        assert await store.can_use_topic(100, 2002) is True
+
+        # Non-existent topic
+        assert await store.can_use_topic(999, 1001) is False
 
     async def test_get_topics_by_owner(self, store: PartyStateStore) -> None:
         """Test retrieving all topics owned by a user."""
-        # Register two topics for alice
+        # Register two topics for user 1001
         await store.register_topic(
             chat_id=12345,
             thread_id=100,
             owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
+            name="Project1",
+            workspace_path="/party/project1",
         )
         await store.register_topic(
             chat_id=12345,
             thread_id=200,
             owner_id=1001,
-            owner_username="alice",
-            name="MyProject",
-            workspace_path="/party/my-project",
-            is_personal=False,
+            name="Project2",
+            workspace_path="/party/project2",
         )
 
-        # Register one topic for bob
+        # Register one topic for user 2002
         await store.register_topic(
             chat_id=12345,
             thread_id=300,
             owner_id=2002,
-            owner_username="bob",
-            name="Bob",
-            workspace_path="/party/2002",
-            is_personal=True,
+            name="Project3",
+            workspace_path="/party/project3",
         )
 
-        alice_topics = await store.get_topics_by_owner(1001)
-        assert len(alice_topics) == 2
+        user1_topics = await store.get_topics_by_owner(1001)
+        assert len(user1_topics) == 2
 
-        bob_topics = await store.get_topics_by_owner(2002)
-        assert len(bob_topics) == 1
+        user2_topics = await store.get_topics_by_owner(2002)
+        assert len(user2_topics) == 1
 
         unknown_topics = await store.get_topics_by_owner(9999)
         assert len(unknown_topics) == 0
@@ -185,10 +145,8 @@ class TestPartyStateStore:
             chat_id=12345,
             thread_id=100,
             owner_id=1001,
-            owner_username="alice",
             name="MyProject",
             workspace_path="/party/my-project",
-            is_personal=False,
         )
 
         # Exact match
@@ -207,16 +165,14 @@ class TestPartyStateStore:
             chat_id=12345,
             thread_id=100,
             owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
+            name="MyProject",
+            workspace_path="/party/my-project",
         )
 
         # Unregister existing topic
         topic = await store.unregister_topic(100)
         assert topic is not None
-        assert topic.name == "Alice"
+        assert topic.name == "MyProject"
 
         # Verify it's gone
         topic = await store.get_topic(100)
@@ -225,63 +181,6 @@ class TestPartyStateStore:
         # Unregister non-existent topic
         topic = await store.unregister_topic(999)
         assert topic is None
-
-    async def test_allow_user(self, store: PartyStateStore) -> None:
-        """Test allowing a user in a topic."""
-        await store.register_topic(
-            chat_id=12345,
-            thread_id=100,
-            owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
-        )
-
-        # Allow a user
-        success = await store.allow_user(100, 2002)
-        assert success is True
-
-        topic = await store.get_topic(100)
-        assert topic is not None
-        assert 2002 in topic.allowed_users
-
-        # Allow same user again (idempotent)
-        success = await store.allow_user(100, 2002)
-        assert success is True
-
-        # Allow on non-existent topic
-        success = await store.allow_user(999, 2002)
-        assert success is False
-
-    async def test_revoke_user(self, store: PartyStateStore) -> None:
-        """Test revoking a user from a topic."""
-        await store.register_topic(
-            chat_id=12345,
-            thread_id=100,
-            owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
-        )
-
-        # Allow then revoke
-        await store.allow_user(100, 2002)
-        success = await store.revoke_user(100, 2002)
-        assert success is True
-
-        topic = await store.get_topic(100)
-        assert topic is not None
-        assert 2002 not in topic.allowed_users
-
-        # Revoke user not in list (idempotent)
-        success = await store.revoke_user(100, 3003)
-        assert success is True
-
-        # Revoke on non-existent topic
-        success = await store.revoke_user(999, 2002)
-        assert success is False
 
     async def test_list_topics(self, store: PartyStateStore) -> None:
         """Test listing all topics."""
@@ -294,25 +193,21 @@ class TestPartyStateStore:
             chat_id=12345,
             thread_id=100,
             owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
+            name="Project1",
+            workspace_path="/party/project1",
         )
         await store.register_topic(
             chat_id=12345,
             thread_id=200,
             owner_id=2002,
-            owner_username="bob",
-            name="Bob",
-            workspace_path="/party/2002",
-            is_personal=True,
+            name="Project2",
+            workspace_path="/party/project2",
         )
 
         topics = await store.list_topics()
         assert len(topics) == 2
         names = {t.name for t in topics}
-        assert names == {"Alice", "Bob"}
+        assert names == {"Project1", "Project2"}
 
     async def test_is_party_chat(self, store: PartyStateStore) -> None:
         """Test checking if a chat is the party chat."""
@@ -324,10 +219,8 @@ class TestPartyStateStore:
             chat_id=12345,
             thread_id=100,
             owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
+            name="MyProject",
+            workspace_path="/party/my-project",
         )
 
         assert await store.is_party_chat(12345) is True
@@ -339,10 +232,8 @@ class TestPartyStateStore:
             chat_id=12345,
             thread_id=100,
             owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
+            name="Project1",
+            workspace_path="/party/project1",
         )
 
         with pytest.raises(ValueError, match="chat ID mismatch"):
@@ -350,11 +241,70 @@ class TestPartyStateStore:
                 chat_id=99999,  # Different chat_id
                 thread_id=200,
                 owner_id=2002,
-                owner_username="bob",
-                name="Bob",
-                workspace_path="/party/2002",
-                is_personal=True,
+                name="Project2",
+                workspace_path="/party/project2",
             )
+
+    async def test_allow_user(self, store: PartyStateStore) -> None:
+        """Test allowing a user to access a topic."""
+        await store.register_topic(
+            chat_id=12345,
+            thread_id=100,
+            owner_id=1001,
+            name="MyProject",
+            workspace_path="/party/my-project",
+        )
+
+        # Allow a new user
+        added = await store.allow_user(100, 2002)
+        assert added is True
+
+        # Verify user is in allowed_users
+        topic = await store.get_topic(100)
+        assert topic is not None
+        assert 2002 in topic.allowed_users
+
+        # Allow same user again returns False
+        added = await store.allow_user(100, 2002)
+        assert added is False
+
+        # Allow owner returns False
+        added = await store.allow_user(100, 1001)
+        assert added is False
+
+    async def test_revoke_user(self, store: PartyStateStore) -> None:
+        """Test revoking a user's access to a topic."""
+        await store.register_topic(
+            chat_id=12345,
+            thread_id=100,
+            owner_id=1001,
+            name="MyProject",
+            workspace_path="/party/my-project",
+        )
+
+        # Allow then revoke
+        await store.allow_user(100, 2002)
+        revoked = await store.revoke_user(100, 2002)
+        assert revoked is True
+
+        # Verify user is no longer in allowed_users
+        topic = await store.get_topic(100)
+        assert topic is not None
+        assert 2002 not in topic.allowed_users
+
+        # Revoke non-allowed user returns False
+        revoked = await store.revoke_user(100, 3003)
+        assert revoked is False
+
+    async def test_allow_user_nonexistent_topic(self, store: PartyStateStore) -> None:
+        """Test allowing user on nonexistent topic raises error."""
+        with pytest.raises(ValueError, match="not found"):
+            await store.allow_user(999, 2002)
+
+    async def test_revoke_user_nonexistent_topic(self, store: PartyStateStore) -> None:
+        """Test revoking user on nonexistent topic raises error."""
+        with pytest.raises(ValueError, match="not found"):
+            await store.revoke_user(999, 2002)
 
     async def test_persistence(self, state_path: Path) -> None:
         """Test that state persists across store instances."""
@@ -363,51 +313,16 @@ class TestPartyStateStore:
             chat_id=12345,
             thread_id=100,
             owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
+            name="MyProject",
+            workspace_path="/party/my-project",
         )
+        await store1.allow_user(100, 2002)
 
         # Create new store instance
         store2 = PartyStateStore(state_path)
         topic = await store2.get_topic(100)
 
         assert topic is not None
-        assert topic.name == "Alice"
+        assert topic.name == "MyProject"
         assert topic.owner_id == 1001
-
-    async def test_update_owner_username(self, store: PartyStateStore) -> None:
-        """Test updating owner username across topics."""
-        # Register two topics for same owner
-        await store.register_topic(
-            chat_id=12345,
-            thread_id=100,
-            owner_id=1001,
-            owner_username="alice",
-            name="Alice",
-            workspace_path="/party/1001",
-            is_personal=True,
-        )
-        await store.register_topic(
-            chat_id=12345,
-            thread_id=200,
-            owner_id=1001,
-            owner_username="alice",
-            name="Project",
-            workspace_path="/party/project",
-            is_personal=False,
-        )
-
-        # Update username
-        count = await store.update_owner_username(1001, "alice_new")
-        assert count == 2
-
-        # Verify both topics updated
-        topics = await store.get_topics_by_owner(1001)
-        for topic in topics:
-            assert topic.owner_username == "alice_new"
-
-        # Update non-existent user
-        count = await store.update_owner_username(9999, "nobody")
-        assert count == 0
+        assert 2002 in topic.allowed_users
