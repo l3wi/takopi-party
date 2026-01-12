@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import anyio
@@ -112,9 +112,7 @@ class PartyStateStore:
                 return None
             return _member_from_state(state)
 
-    async def get_member_by_thread(
-        self, chat_id: int, thread_id: int | None
-    ) -> PartyMember | None:
+    async def get_member_by_thread(self, chat_id: int, thread_id: int | None) -> PartyMember | None:
         """Get party member by thread_id.
 
         Returns None if:
@@ -166,7 +164,7 @@ class PartyStateStore:
                 display_name=display_name,
                 thread_id=thread_id,
                 workspace_path=workspace_path,
-                registered_at=datetime.now(timezone.utc).isoformat(),
+                registered_at=datetime.now(UTC).isoformat(),
                 allowed_users=frozenset(),
             )
 
@@ -243,9 +241,7 @@ class PartyStateStore:
         """List all registered party members."""
         async with self._lock:
             self._reload_locked_if_needed()
-            return [
-                _member_from_state(state) for state in self._state.members.values()
-            ]
+            return [_member_from_state(state) for state in self._state.members.values()]
 
     async def update_username(self, user_id: int, username: str | None) -> bool:
         """Update a member's username (for tracking @username changes)."""

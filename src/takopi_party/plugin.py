@@ -430,8 +430,7 @@ class PartyCommand:
 
         if not members:
             return CommandResult(
-                text="No party members registered yet.\n"
-                "Use `/party register` to join the party!",
+                text="No party members registered yet.\nUse `/party register` to join the party!",
                 notify=True,
             )
 

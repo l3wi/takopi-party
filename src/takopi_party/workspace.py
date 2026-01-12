@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -80,8 +80,7 @@ class PartyWorkspaceManager:
             # Create initial README
             readme = workspace / "README.md"
             readme.write_text(
-                f"# Party Workspace: {display_name}\n\n"
-                f"Created: {datetime.now(timezone.utc).isoformat()}\n"
+                f"# Party Workspace: {display_name}\n\nCreated: {datetime.now(UTC).isoformat()}\n"
             )
 
             # Create initial commit
@@ -120,7 +119,7 @@ class PartyWorkspaceManager:
         if not workspace.exists():
             return None
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         archive_dir = self._base / "archived"
         archive_path = archive_dir / f"{user_id}_{timestamp}"
 
