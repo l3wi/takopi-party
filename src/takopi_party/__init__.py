@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-__all__ = ["PartyStateStore", "PartyWorkspaceManager", "BACKEND"]
+__all__ = ["PartyStateStore", "PartyTopic", "PartyWorkspaceManager", "BACKEND"]
 
 from .plugin import BACKEND
-from .state import PartyStateStore
+from .state import PartyStateStore, PartyTopic
 from .workspace import PartyWorkspaceManager

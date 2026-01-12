@@ -1,0 +1,224 @@
+"""TOML config file management for party plugin.
+
+This module provides functions to append/remove project entries from
+the takopi.toml config file, enabling hot-reload integration.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import tomli
+import tomli_w
+
+
+def _load_config(config_path: Path) -> dict[str, Any]:
+    """Load TOML config file."""
+    with config_path.open("rb") as f:
+        return tomli.load(f)
+
+
+def _save_config(config_path: Path, config: dict[str, Any]) -> None:
+    """Save TOML config file."""
+    with config_path.open("wb") as f:
+        tomli_w.dump(config, f)
+
+
+def _make_project_key(name: str, is_personal: bool) -> str:
+    """Generate a unique project key for takopi config.
+
+    Personal topics use 'party-user-{name}', project topics use 'party-{name}'.
+    Names are sanitized to be valid TOML keys (lowercase, hyphens).
+    """
+    # Sanitize name for TOML key
+    sanitized = name.lower().replace(" ", "-").replace("_", "-")
+    # Remove any non-alphanumeric chars except hyphens
+    sanitized = "".join(c for c in sanitized if c.isalnum() or c == "-")
+    # Remove consecutive hyphens
+    while "--" in sanitized:
+        sanitized = sanitized.replace("--", "-")
+    sanitized = sanitized.strip("-")
+
+    if is_personal:
+        return f"party-user-{sanitized}"
+    return f"party-{sanitized}"
+
+
+def add_party_project(
+    config_path: Path,
+    workspace_path: Path,
+    name: str,
+    is_personal: bool,
+) -> str:
+    """Add a party project entry to takopi.toml.
+
+    Args:
+        config_path: Path to takopi.toml
+        workspace_path: Absolute path to the workspace directory
+        name: Human-readable topic name
+        is_personal: Whether this is a personal topic
+
+    Returns:
+        The project key that was added (for use with /ctx set)
+
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        ValueError: If project key already exists
+    """
+    config = _load_config(config_path)
+
+    # Ensure projects dict exists
+    if "projects" not in config:
+        config["projects"] = {}
+
+    project_key = _make_project_key(name, is_personal)
+
+    # Check for collision
+    if project_key in config["projects"]:
+        raise ValueError(f"Project key '{project_key}' already exists in config")
+
+    # Add project entry
+    config["projects"][project_key] = {
+        "path": str(workspace_path),
+        "worktrees_dir": ".worktrees",
+        "default_engine": "claude",
+    }
+
+    _save_config(config_path, config)
+    return project_key
+
+
+def remove_party_project(config_path: Path, name: str, is_personal: bool) -> bool:
+    """Remove a party project entry from takopi.toml.
+
+    Args:
+        config_path: Path to takopi.toml
+        name: Human-readable topic name
+        is_personal: Whether this is a personal topic
+
+    Returns:
+        True if the project was removed, False if not found
+    """
+    try:
+        config = _load_config(config_path)
+    except FileNotFoundError:
+        return False
+
+    if "projects" not in config:
+        return False
+
+    project_key = _make_project_key(name, is_personal)
+
+    if project_key not in config["projects"]:
+        return False
+
+    del config["projects"][project_key]
+    _save_config(config_path, config)
+    return True
+
+
+def get_party_project_key(name: str, is_personal: bool) -> str:
+    """Get the project key for a party topic.
+
+    This is useful for generating the /ctx set command hint.
+    """
+    return _make_project_key(name, is_personal)
+
+
+# Topic state binding (writes directly to telegram_topics_state.json)
+
+TOPIC_STATE_FILENAME = "telegram_topics_state.json"
+TOPIC_STATE_VERSION = 1
+
+
+def _load_topic_state(state_path: Path) -> dict[str, Any]:
+    """Load topic state JSON file."""
+    import json
+
+    if not state_path.exists():
+        return {"version": TOPIC_STATE_VERSION, "threads": {}}
+    with state_path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _save_topic_state(state_path: Path, state: dict[str, Any]) -> None:
+    """Save topic state JSON file."""
+    import json
+    import os
+
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = state_path.with_suffix(f"{state_path.suffix}.tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, sort_keys=True)
+        f.write("\n")
+    os.replace(tmp_path, state_path)
+
+
+def bind_topic_to_project(
+    config_path: Path,
+    chat_id: int,
+    thread_id: int,
+    project_key: str,
+    topic_title: str | None = None,
+) -> None:
+    """Bind a forum topic to a project in takopi's topic state.
+
+    This directly writes to telegram_topics_state.json, which takopi
+    reads to determine the context for each forum topic.
+
+    Args:
+        config_path: Path to takopi.toml (state file is in same directory)
+        chat_id: Telegram chat ID
+        thread_id: Forum topic thread ID
+        project_key: Project key to bind to
+        topic_title: Optional topic title for display
+    """
+    state_path = config_path.with_name(TOPIC_STATE_FILENAME)
+    state = _load_topic_state(state_path)
+
+    # Ensure threads dict exists
+    if "threads" not in state:
+        state["threads"] = {}
+
+    # Create thread key (format: "chat_id:thread_id")
+    thread_key = f"{chat_id}:{thread_id}"
+
+    # Add or update thread entry
+    thread_entry = state["threads"].get(thread_key, {})
+    thread_entry["context"] = {"project": project_key}
+    if topic_title:
+        thread_entry["topic_title"] = topic_title
+
+    state["threads"][thread_key] = thread_entry
+    _save_topic_state(state_path, state)
+
+
+def unbind_topic(config_path: Path, chat_id: int, thread_id: int) -> bool:
+    """Remove topic binding from takopi's topic state.
+
+    Args:
+        config_path: Path to takopi.toml
+        chat_id: Telegram chat ID
+        thread_id: Forum topic thread ID
+
+    Returns:
+        True if binding was removed, False if not found
+    """
+    state_path = config_path.with_name(TOPIC_STATE_FILENAME)
+
+    import json
+
+    try:
+        state = _load_topic_state(state_path)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return False
+
+    thread_key = f"{chat_id}:{thread_id}"
+
+    if "threads" not in state or thread_key not in state["threads"]:
+        return False
+
+    del state["threads"][thread_key]
+    _save_topic_state(state_path, state)
+    return True

@@ -1,6 +1,6 @@
 [project]
 name = "takopi-party"
-version = "0.1.0"
+version = "0.2.0"
 description = "Party mode plugin for Takopi - multi-user private topics"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -30,6 +30,8 @@ classifiers = [
 ]
 dependencies = [
     "takopi>=0.17.0",
+    "tomli>=2.0",
+    "tomli-w>=1.0",
 ]
 
 [project.urls]
@@ -47,12 +49,14 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    "pytest-anyio>=0.0",
+    "pytest-asyncio>=0.24",
     "ruff>=0.8",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100

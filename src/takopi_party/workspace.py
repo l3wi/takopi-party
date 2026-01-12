@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from datetime import UTC, datetime
@@ -12,8 +13,22 @@ class WorkspaceError(Exception):
     """Error during workspace operations."""
 
 
+def _sanitize_project_name(name: str) -> str:
+    """Sanitize project name for use as folder name.
+
+    Converts to lowercase, replaces spaces and special chars with hyphens.
+    """
+    # Lowercase and replace spaces/special chars with hyphens
+    sanitized = re.sub(r"[^a-z0-9]+", "-", name.lower())
+    # Remove leading/trailing hyphens
+    sanitized = sanitized.strip("-")
+    # Collapse multiple hyphens
+    sanitized = re.sub(r"-+", "-", sanitized)
+    return sanitized or "project"
+
+
 class PartyWorkspaceManager:
-    """Manages isolated workspaces for party members."""
+    """Manages isolated workspaces for party topics."""
 
     def __init__(self, base_path: Path) -> None:
         self._base = base_path
@@ -23,20 +38,31 @@ class PartyWorkspaceManager:
         """Get the base path for all workspaces."""
         return self._base
 
-    def workspace_path(self, user_id: int) -> Path:
-        """Get the workspace path for a user."""
+    def personal_workspace_path(self, user_id: int) -> Path:
+        """Get the workspace path for a user's personal topic."""
         return self._base / str(user_id)
 
-    def workspace_exists(self, user_id: int) -> bool:
-        """Check if a workspace exists for a user."""
-        return self.workspace_path(user_id).exists()
+    def project_workspace_path(self, project_name: str) -> Path:
+        """Get the workspace path for a named project."""
+        sanitized = _sanitize_project_name(project_name)
+        return self._base / sanitized
 
-    def create_workspace(self, user_id: int, display_name: str) -> Path:
+    def workspace_exists(self, path: Path) -> bool:
+        """Check if a workspace exists at the given path."""
+        return path.exists()
+
+    def create_workspace(
+        self,
+        path: Path,
+        display_name: str,
+        owner_id: int,
+    ) -> Path:
         """Create workspace folder and initialize git repo.
 
         Args:
-            user_id: The user's Telegram ID
+            path: The workspace directory path
             display_name: Human-readable name for the workspace
+            owner_id: The owner's Telegram ID (for git config)
 
         Returns:
             Path to the created workspace
@@ -44,13 +70,11 @@ class PartyWorkspaceManager:
         Raises:
             WorkspaceError: If workspace creation fails
         """
-        workspace = self.workspace_path(user_id)
-
-        if workspace.exists():
-            raise WorkspaceError(f"Workspace already exists for user {user_id}")
+        if path.exists():
+            raise WorkspaceError(f"Workspace already exists at {path}")
 
         try:
-            workspace.mkdir(parents=True, exist_ok=False)
+            path.mkdir(parents=True, exist_ok=False)
         except OSError as exc:
             raise WorkspaceError(f"Failed to create workspace directory: {exc}") from exc
 
@@ -58,55 +82,55 @@ class PartyWorkspaceManager:
             # Initialize git repo
             subprocess.run(
                 ["git", "init"],
-                cwd=workspace,
+                cwd=path,
                 check=True,
                 capture_output=True,
             )
 
             # Configure git user for this workspace
             subprocess.run(
-                ["git", "config", "user.email", f"party-{user_id}@takopi.local"],
-                cwd=workspace,
+                ["git", "config", "user.email", f"party-{owner_id}@takopi.local"],
+                cwd=path,
                 check=True,
                 capture_output=True,
             )
             subprocess.run(
                 ["git", "config", "user.name", display_name],
-                cwd=workspace,
+                cwd=path,
                 check=True,
                 capture_output=True,
             )
 
             # Create initial README
-            readme = workspace / "README.md"
+            readme = path / "README.md"
             readme.write_text(
                 f"# Party Workspace: {display_name}\n\nCreated: {datetime.now(UTC).isoformat()}\n"
             )
 
             # Create initial commit
-            subprocess.run(["git", "add", "."], cwd=workspace, check=True, capture_output=True)
+            subprocess.run(["git", "add", "."], cwd=path, check=True, capture_output=True)
             subprocess.run(
                 ["git", "commit", "-m", "Initial commit"],
-                cwd=workspace,
+                cwd=path,
                 check=True,
                 capture_output=True,
             )
         except subprocess.CalledProcessError as exc:
             # Clean up on failure
-            shutil.rmtree(workspace, ignore_errors=True)
+            shutil.rmtree(path, ignore_errors=True)
             stderr = exc.stderr.decode() if exc.stderr else str(exc)
             raise WorkspaceError(f"Failed to initialize git repo: {stderr}") from exc
         except OSError as exc:
-            shutil.rmtree(workspace, ignore_errors=True)
+            shutil.rmtree(path, ignore_errors=True)
             raise WorkspaceError(f"Failed to create workspace files: {exc}") from exc
 
-        return workspace
+        return path
 
-    def archive_workspace(self, user_id: int) -> Path | None:
+    def archive_workspace(self, path: Path) -> Path | None:
         """Archive a workspace by moving it to the archived folder.
 
         Args:
-            user_id: The user's Telegram ID
+            path: The workspace path to archive
 
         Returns:
             Path to the archived workspace, or None if no workspace existed
@@ -114,28 +138,26 @@ class PartyWorkspaceManager:
         Raises:
             WorkspaceError: If archival fails
         """
-        workspace = self.workspace_path(user_id)
-
-        if not workspace.exists():
+        if not path.exists():
             return None
 
         timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         archive_dir = self._base / "archived"
-        archive_path = archive_dir / f"{user_id}_{timestamp}"
+        archive_path = archive_dir / f"{path.name}_{timestamp}"
 
         try:
             archive_dir.mkdir(parents=True, exist_ok=True)
-            workspace.rename(archive_path)
+            path.rename(archive_path)
         except OSError as exc:
             raise WorkspaceError(f"Failed to archive workspace: {exc}") from exc
 
         return archive_path
 
-    def delete_workspace(self, user_id: int) -> bool:
+    def delete_workspace(self, path: Path) -> bool:
         """Permanently delete a workspace.
 
         Args:
-            user_id: The user's Telegram ID
+            path: The workspace path to delete
 
         Returns:
             True if workspace was deleted, False if it didn't exist
@@ -143,29 +165,27 @@ class PartyWorkspaceManager:
         Raises:
             WorkspaceError: If deletion fails
         """
-        workspace = self.workspace_path(user_id)
-
-        if not workspace.exists():
+        if not path.exists():
             return False
 
         try:
-            shutil.rmtree(workspace)
+            shutil.rmtree(path)
         except OSError as exc:
             raise WorkspaceError(f"Failed to delete workspace: {exc}") from exc
 
         return True
 
-    def cleanup_workspace(self, user_id: int, *, archive: bool = True) -> Path | None:
+    def cleanup_workspace(self, path: Path, *, archive: bool = True) -> Path | None:
         """Remove or archive workspace.
 
         Args:
-            user_id: The user's Telegram ID
+            path: The workspace path
             archive: If True, archive the workspace; if False, delete it
 
         Returns:
             Path to archived workspace if archived, None otherwise
         """
         if archive:
-            return self.archive_workspace(user_id)
-        self.delete_workspace(user_id)
+            return self.archive_workspace(path)
+        self.delete_workspace(path)
         return None
