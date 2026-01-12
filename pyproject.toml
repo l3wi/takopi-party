@@ -1,0 +1,73 @@
+[project]
+name = "takopi-party"
+version = "0.1.0"
+description = "Party mode plugin for Takopi - multi-user private topics"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.14"
+authors = [
+    { name = "Lewis Freiberg", email = "lewis@freiberg.dev" },
+]
+keywords = [
+    "takopi",
+    "plugin",
+    "telegram",
+    "multi-user",
+    "party",
+    "topics",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Communications :: Chat",
+    "Typing :: Typed",
+]
+dependencies = [
+    "takopi>=0.17.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/l3wi/takopi-party"
+Repository = "https://github.com/l3wi/takopi-party"
+Issues = "https://github.com/l3wi/takopi-party/issues"
+
+[project.entry-points."takopi.command_backends"]
+party = "takopi_party.plugin:BACKEND"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-anyio>=0.0",
+    "ruff>=0.8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/takopi_party"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+]
