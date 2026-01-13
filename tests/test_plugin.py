@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 import tomli
@@ -13,7 +13,7 @@ import tomli
 from takopi_party.plugin import (
     PartyCommand,
     _extract_mentioned_user_id,
-    _get_thread_id_from_message,
+    _get_thread_id,
 )
 
 
@@ -25,13 +25,6 @@ class MockMessage:
     raw: dict[str, Any] | None = None
     thread_id: int | None = None
     sender_id: int | None = None
-
-
-@dataclass
-class MockForumTopic:
-    """Mock forum topic result."""
-
-    message_thread_id: int
 
 
 def make_raw_message(
@@ -59,13 +52,14 @@ def make_context(
     chat_id: int,
     config_path: Path,
     raw_message: dict[str, Any] | None = None,
-    bot: Any = None,
     workspace_base: str = "/party",
     sender_id: int | None = None,
+    thread_id: int | None = None,
 ) -> MagicMock:
     """Create a mock CommandContext."""
-    # Extract thread_id from raw_message if present
-    thread_id = raw_message.get("message_thread_id") if raw_message else None
+    # Extract thread_id from raw_message if not provided explicitly
+    if thread_id is None and raw_message:
+        thread_id = raw_message.get("message_thread_id")
     # Extract sender_id from raw_message if not provided explicitly
     if sender_id is None and raw_message:
         from_user = raw_message.get("from")
@@ -79,7 +73,6 @@ def make_context(
     )
     ctx.config_path = config_path
     ctx.plugin_config = {
-        "bot": bot,
         "workspace_base": workspace_base,
     }
     return ctx
@@ -88,15 +81,26 @@ def make_context(
 class TestHelperFunctions:
     """Tests for helper functions."""
 
-    def test_get_thread_id_from_message(self) -> None:
-        """Test extracting thread_id from message."""
-        raw = make_raw_message(12345, thread_id=100)
-        assert _get_thread_id_from_message(raw) == 100
+    def test_get_thread_id_from_context(self) -> None:
+        """Test extracting thread_id from context."""
+        ctx = MagicMock()
+        ctx.message = MockMessage(channel_id=123, thread_id=100)
+        ctx.message.raw = None
+        assert _get_thread_id(ctx) == 100
 
-        raw = make_raw_message(12345)
-        assert _get_thread_id_from_message(raw) is None
+    def test_get_thread_id_from_raw(self) -> None:
+        """Test extracting thread_id from raw message."""
+        ctx = MagicMock()
+        ctx.message = MockMessage(channel_id=123, thread_id=None)
+        ctx.message.raw = {"message_thread_id": 200}
+        assert _get_thread_id(ctx) == 200
 
-        assert _get_thread_id_from_message(None) is None
+    def test_get_thread_id_none(self) -> None:
+        """Test extracting thread_id returns None when not in topic."""
+        ctx = MagicMock()
+        ctx.message = MockMessage(channel_id=123, thread_id=None)
+        ctx.message.raw = None
+        assert _get_thread_id(ctx) is None
 
     def test_extract_mentioned_user_id_valid(self) -> None:
         """Test extracting mentioned user ID from valid message."""
@@ -143,14 +147,6 @@ def workspace_base(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def mock_bot() -> AsyncMock:
-    """Return a mock bot client."""
-    bot = AsyncMock()
-    bot.create_forum_topic = AsyncMock(return_value=MockForumTopic(message_thread_id=100))
-    return bot
-
-
-@pytest.fixture
 def party_command() -> PartyCommand:
     """Return a fresh PartyCommand instance."""
     return PartyCommand()
@@ -178,44 +174,61 @@ class TestPartyCommand:
         assert result is not None
         assert "Party Mode Commands" in result.text
 
+    async def test_handle_register_not_in_topic_fails(
+        self,
+        party_command: PartyCommand,
+        tmp_config_path: Path,
+        workspace_base: Path,
+    ) -> None:
+        """Test /party register outside of topic fails."""
+        raw = make_raw_message(12345)  # No thread_id
+        ctx = make_context(
+            ["register", "MyProject"],
+            99999,
+            tmp_config_path,
+            raw_message=raw,
+            workspace_base=str(workspace_base),
+        )
+
+        result = await party_command.handle(ctx)
+
+        assert result is not None
+        assert "inside a forum topic" in result.text
+
     async def test_handle_register_without_name_fails(
         self,
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party register without name fails."""
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
 
         result = await party_command.handle(ctx)
 
         assert result is not None
-        assert "Please provide a topic name" in result.text
+        assert "provide a name" in result.text
 
-    async def test_handle_register_project(
+    async def test_handle_register_success(
         self,
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
-        """Test /party register ProjectName creates project topic."""
-        raw = make_raw_message(12345)
+        """Test /party register inside topic succeeds."""
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "MyProject"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
 
@@ -223,41 +236,75 @@ class TestPartyCommand:
 
         assert result is not None
         assert "MyProject" in result.text
-        assert "created and ready to use" in result.text
+        assert "registered" in result.text
 
-    async def test_handle_register_project_duplicate_name_fails(
+    async def test_handle_register_duplicate_name_fails(
         self,
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party register with duplicate name fails."""
-        raw = make_raw_message(12345)
+        # First registration
+        raw1 = make_raw_message(12345, thread_id=100)
+        ctx1 = make_context(
+            ["register", "MyProject"],
+            99999,
+            tmp_config_path,
+            raw_message=raw1,
+            workspace_base=str(workspace_base),
+        )
+        result = await party_command.handle(ctx1)
+        assert "MyProject" in result.text
+
+        # Second registration with same name in different topic
+        raw2 = make_raw_message(12345, thread_id=200)
+        ctx2 = make_context(
+            ["register", "MyProject"],
+            99999,
+            tmp_config_path,
+            raw_message=raw2,
+            workspace_base=str(workspace_base),
+        )
+        result = await party_command.handle(ctx2)
+        assert "already exists" in result.text
+
+    async def test_handle_register_already_registered_fails(
+        self,
+        party_command: PartyCommand,
+        tmp_config_path: Path,
+        workspace_base: Path,
+    ) -> None:
+        """Test /party register in already registered topic fails."""
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "MyProject"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
 
-        # First registration should succeed
+        # First registration succeeds
         result = await party_command.handle(ctx)
-        assert "MyProject" in result.text
+        assert "registered" in result.text
 
-        # Second registration with same name should fail
-        mock_bot.create_forum_topic = AsyncMock(return_value=MockForumTopic(message_thread_id=200))
-        result = await party_command.handle(ctx)
-        assert "already exists" in result.text
+        # Second registration in same topic fails
+        ctx2 = make_context(
+            ["register", "AnotherName"],
+            99999,
+            tmp_config_path,
+            raw_message=raw,
+            workspace_base=str(workspace_base),
+        )
+        result = await party_command.handle(ctx2)
+        assert "already registered" in result.text
 
     async def test_handle_register_no_sender(
         self,
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party register fails without sender info."""
         ctx = make_context(
@@ -265,8 +312,8 @@ class TestPartyCommand:
             99999,
             tmp_config_path,
             raw_message=None,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
+            thread_id=100,  # In a topic but no sender
         )
 
         result = await party_command.handle(ctx)
@@ -289,17 +336,15 @@ class TestPartyCommand:
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party list shows registered topics."""
         # Register a topic first
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "TestProject"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
         await party_command.handle(ctx)
@@ -338,62 +383,57 @@ class TestPartyCommand:
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
-        """Test /party leave closes topic."""
+        """Test /party leave unregisters topic."""
         # Register a topic first
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "MyProject"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
         await party_command.handle(ctx)
 
-        # Leave the topic (from within the topic)
-        raw_in_topic = make_raw_message(12345, thread_id=100)
+        # Leave the topic
         ctx2 = make_context(
             ["leave"],
             99999,
             tmp_config_path,
-            raw_message=raw_in_topic,
+            raw_message=raw,
             workspace_base=str(workspace_base),
         )
         result = await party_command.handle(ctx2)
 
         assert result is not None
-        assert "Goodbye" in result.text
+        assert "unregistered" in result.text
 
     async def test_handle_allow_success(
         self,
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party allow @user succeeds."""
         # Register a topic first
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "MyProject"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
         await party_command.handle(ctx)
 
-        # Allow another user (from within the topic)
-        raw_in_topic = make_raw_message(12345, thread_id=100, mentioned_user_id=67890)
+        # Allow another user
+        raw_with_mention = make_raw_message(12345, thread_id=100, mentioned_user_id=67890)
         ctx2 = make_context(
             ["allow", "@someone"],
             99999,
             tmp_config_path,
-            raw_message=raw_in_topic,
+            raw_message=raw_with_mention,
             workspace_base=str(workspace_base),
         )
         result = await party_command.handle(ctx2)
@@ -407,28 +447,25 @@ class TestPartyCommand:
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party allow without @mention fails."""
         # Register a topic first
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "MyProject"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
         await party_command.handle(ctx)
 
-        # Try to allow without mention (from within the topic)
-        raw_in_topic = make_raw_message(12345, thread_id=100)
+        # Try to allow without mention
         ctx2 = make_context(
             ["allow"],
             99999,
             tmp_config_path,
-            raw_message=raw_in_topic,
+            raw_message=raw,
             workspace_base=str(workspace_base),
         )
         result = await party_command.handle(ctx2)
@@ -441,17 +478,15 @@ class TestPartyCommand:
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party revoke @user succeeds."""
         # Register a topic first
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "MyProject"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
         await party_command.handle(ctx)
@@ -491,38 +526,35 @@ class TestPartyCommandIntegration:
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test creating multiple project topics."""
-        raw = make_raw_message(12345)
-
-        # Create first project
+        # Create first project in topic 100
+        raw1 = make_raw_message(12345, thread_id=100)
         ctx1 = make_context(
             ["register", "Project1"],
             99999,
             tmp_config_path,
-            raw_message=raw,
-            bot=mock_bot,
+            raw_message=raw1,
             workspace_base=str(workspace_base),
         )
         result = await party_command.handle(ctx1)
         assert "Project1" in result.text
 
-        # Create second project
-        mock_bot.create_forum_topic = AsyncMock(return_value=MockForumTopic(message_thread_id=200))
+        # Create second project in topic 200
+        raw2 = make_raw_message(12345, thread_id=200)
         ctx2 = make_context(
             ["register", "Project2"],
             99999,
             tmp_config_path,
-            raw_message=raw,
-            bot=mock_bot,
+            raw_message=raw2,
             workspace_base=str(workspace_base),
         )
         result = await party_command.handle(ctx2)
         assert "Project2" in result.text
 
         # List user's topics
-        ctx3 = make_context(["topics"], 99999, tmp_config_path, raw_message=raw)
+        raw3 = make_raw_message(12345)
+        ctx3 = make_context(["topics"], 99999, tmp_config_path, raw_message=raw3)
         result = await party_command.handle(ctx3)
         assert "Project1" in result.text
         assert "Project2" in result.text
@@ -536,16 +568,14 @@ class TestConfigIntegration:
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party register adds project entry to takopi.toml."""
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "MyProject"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
 
@@ -553,7 +583,7 @@ class TestConfigIntegration:
 
         assert result is not None
         assert "MyProject" in result.text
-        assert "ready to use" in result.text
+        assert "registered" in result.text
 
         # Verify config was updated
         with tmp_config_path.open("rb") as f:
@@ -567,16 +597,14 @@ class TestConfigIntegration:
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party register ProjectName adds correct project key."""
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "My Cool Project"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
 
@@ -584,7 +612,7 @@ class TestConfigIntegration:
 
         assert result is not None
         assert "My Cool Project" in result.text
-        assert "ready to use" in result.text
+        assert "registered" in result.text
 
         # Verify config
         with tmp_config_path.open("rb") as f:
@@ -597,18 +625,16 @@ class TestConfigIntegration:
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party register auto-binds topic in takopi's state."""
         import json
 
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "MyProject"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
 
@@ -627,17 +653,15 @@ class TestConfigIntegration:
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party leave removes project from takopi.toml."""
         # Register topic
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "MyProject"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
         await party_command.handle(ctx)
@@ -648,18 +672,17 @@ class TestConfigIntegration:
         assert "party-myproject" in config["projects"]
 
         # Leave the topic
-        raw_in_topic = make_raw_message(12345, thread_id=100)
         ctx2 = make_context(
             ["leave"],
             99999,
             tmp_config_path,
-            raw_message=raw_in_topic,
+            raw_message=raw,
             workspace_base=str(workspace_base),
         )
         result = await party_command.handle(ctx2)
 
         assert result is not None
-        assert "Goodbye" in result.text
+        assert "unregistered" in result.text
 
         # Verify project was removed
         with tmp_config_path.open("rb") as f:
@@ -671,19 +694,17 @@ class TestConfigIntegration:
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party leave removes topic binding from takopi's state."""
         import json
 
         # Register topic
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "MyProject"],
             99999,
             tmp_config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
         await party_command.handle(ctx)
@@ -695,12 +716,11 @@ class TestConfigIntegration:
         assert "99999:100" in state["threads"]
 
         # Leave the topic
-        raw_in_topic = make_raw_message(12345, thread_id=100)
         ctx2 = make_context(
             ["leave"],
             99999,
             tmp_config_path,
-            raw_message=raw_in_topic,
+            raw_message=raw,
             workspace_base=str(workspace_base),
         )
         await party_command.handle(ctx2)
@@ -715,19 +735,17 @@ class TestConfigIntegration:
         party_command: PartyCommand,
         tmp_path: Path,
         workspace_base: Path,
-        mock_bot: AsyncMock,
     ) -> None:
         """Test /party register works even without config file."""
         # Use a non-existent config path
         config_path = tmp_path / "nonexistent.toml"
 
-        raw = make_raw_message(12345)
+        raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
             ["register", "MyProject"],
             99999,
             config_path,
             raw_message=raw,
-            bot=mock_bot,
             workspace_base=str(workspace_base),
         )
 
@@ -736,4 +754,4 @@ class TestConfigIntegration:
         # Should still succeed (config update is best-effort)
         assert result is not None
         assert "MyProject" in result.text
-        assert "ready to use" in result.text
+        assert "registered" in result.text
