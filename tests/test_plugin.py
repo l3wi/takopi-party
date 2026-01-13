@@ -13,7 +13,6 @@ import tomli
 from takopi_party.plugin import (
     PartyCommand,
     _extract_mentioned_user_id,
-    _extract_sender_id,
     _get_thread_id_from_message,
 )
 
@@ -25,6 +24,7 @@ class MockMessage:
     channel_id: int
     raw: dict[str, Any] | None = None
     thread_id: int | None = None
+    sender_id: int | None = None
 
 
 @dataclass
@@ -61,17 +61,24 @@ def make_context(
     raw_message: dict[str, Any] | None = None,
     bot: Any = None,
     workspace_base: str = "/party",
+    sender_id: int | None = None,
 ) -> MagicMock:
     """Create a mock CommandContext."""
     # Extract thread_id from raw_message if present
     thread_id = raw_message.get("message_thread_id") if raw_message else None
+    # Extract sender_id from raw_message if not provided explicitly
+    if sender_id is None and raw_message:
+        from_user = raw_message.get("from")
+        if isinstance(from_user, dict):
+            sender_id = from_user.get("id")
 
     ctx = MagicMock()
     ctx.args = args
-    ctx.message = MockMessage(channel_id=chat_id, raw=raw_message, thread_id=thread_id)
+    ctx.message = MockMessage(
+        channel_id=chat_id, raw=raw_message, thread_id=thread_id, sender_id=sender_id
+    )
     ctx.config_path = config_path
     ctx.plugin_config = {
-        "raw_message": raw_message,
         "bot": bot,
         "workspace_base": workspace_base,
     }
@@ -80,32 +87,6 @@ def make_context(
 
 class TestHelperFunctions:
     """Tests for helper functions."""
-
-    def test_extract_sender_id_valid(self) -> None:
-        """Test extracting sender ID from valid message."""
-        raw = make_raw_message(12345)
-        sender_id = _extract_sender_id(raw)
-        assert sender_id == 12345
-
-    def test_extract_sender_id_none(self) -> None:
-        """Test extracting sender ID from None returns None."""
-        sender_id = _extract_sender_id(None)
-        assert sender_id is None
-
-    def test_extract_sender_id_no_from(self) -> None:
-        """Test extracting sender ID when 'from' is missing."""
-        sender_id = _extract_sender_id({})
-        assert sender_id is None
-
-    def test_extract_sender_id_invalid_from(self) -> None:
-        """Test extracting sender ID when 'from' is not a dict."""
-        sender_id = _extract_sender_id({"from": "not a dict"})
-        assert sender_id is None
-
-    def test_extract_sender_id_no_id(self) -> None:
-        """Test extracting sender ID when 'id' is missing."""
-        sender_id = _extract_sender_id({"from": {}})
-        assert sender_id is None
 
     def test_get_thread_id_from_message(self) -> None:
         """Test extracting thread_id from message."""

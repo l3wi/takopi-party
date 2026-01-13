@@ -23,26 +23,6 @@ from .workspace import PartyWorkspaceManager, WorkspaceError
 DEFAULT_WORKSPACE_BASE = "/root/dev/party"
 
 
-def _extract_sender_id(raw: dict[str, Any] | None) -> int | None:
-    """Extract sender_id from raw message.
-
-    Returns:
-        The sender's user ID, or None if not available.
-    """
-    if raw is None:
-        return None
-
-    sender = raw.get("from")
-    if not isinstance(sender, dict):
-        return None
-
-    sender_id = sender.get("id")
-    if not isinstance(sender_id, int):
-        return None
-
-    return sender_id
-
-
 def _extract_mentioned_user_id(raw: dict[str, Any] | None) -> int | None:
     """Extract user ID from a text_mention entity in the message.
 
@@ -95,13 +75,8 @@ def _get_thread_id(ctx: CommandContext, raw: dict[str, Any] | None) -> int | Non
 
 
 def _get_raw_message(ctx: CommandContext) -> dict[str, Any] | None:
-    """Get raw message from context.
-
-    Prefers ctx.message.raw (if available), falls back to plugin_config.
-    """
-    if ctx.message.raw is not None:
-        return ctx.message.raw
-    return ctx.plugin_config.get("raw_message")
+    """Get raw message from context."""
+    return ctx.message.raw
 
 
 class PartyCommand:
@@ -191,9 +166,7 @@ class PartyCommand:
 
     async def _handle_register(self, ctx: CommandContext) -> CommandResult:
         """Register a new topic."""
-        raw = _get_raw_message(ctx)
-        sender_id = _extract_sender_id(raw)
-
+        sender_id = ctx.message.sender_id
         if sender_id is None:
             return CommandResult(
                 text="Could not identify sender. Please try again.",
@@ -324,9 +297,7 @@ class PartyCommand:
 
     async def _handle_leave(self, ctx: CommandContext) -> CommandResult:
         """Leave/close the current topic."""
-        raw = _get_raw_message(ctx)
-        sender_id = _extract_sender_id(raw)
-
+        sender_id = ctx.message.sender_id
         if sender_id is None:
             return CommandResult(
                 text="Could not identify sender.",
@@ -337,6 +308,7 @@ class PartyCommand:
         workspace_mgr = self._get_workspace_manager(ctx)
 
         # Get current thread_id
+        raw = _get_raw_message(ctx)
         thread_id = _get_thread_id(ctx, raw)
         if thread_id is None:
             return CommandResult(
@@ -397,9 +369,7 @@ class PartyCommand:
 
     async def _handle_allow(self, ctx: CommandContext) -> CommandResult:
         """Allow another user to use the current topic."""
-        raw = _get_raw_message(ctx)
-        sender_id = _extract_sender_id(raw)
-
+        sender_id = ctx.message.sender_id
         if sender_id is None:
             return CommandResult(
                 text="Could not identify sender.",
@@ -407,6 +377,7 @@ class PartyCommand:
             )
 
         store = self._get_store(ctx)
+        raw = _get_raw_message(ctx)
 
         # Get current thread_id
         thread_id = _get_thread_id(ctx, raw)
@@ -469,9 +440,7 @@ class PartyCommand:
 
     async def _handle_revoke(self, ctx: CommandContext) -> CommandResult:
         """Revoke another user's access to the current topic."""
-        raw = _get_raw_message(ctx)
-        sender_id = _extract_sender_id(raw)
-
+        sender_id = ctx.message.sender_id
         if sender_id is None:
             return CommandResult(
                 text="Could not identify sender.",
@@ -479,6 +448,7 @@ class PartyCommand:
             )
 
         store = self._get_store(ctx)
+        raw = _get_raw_message(ctx)
 
         # Get current thread_id
         thread_id = _get_thread_id(ctx, raw)
@@ -542,9 +512,7 @@ class PartyCommand:
 
     async def _handle_my_topics(self, ctx: CommandContext) -> CommandResult:
         """List topics owned by the current user."""
-        raw = _get_raw_message(ctx)
-        sender_id = _extract_sender_id(raw)
-
+        sender_id = ctx.message.sender_id
         if sender_id is None:
             return CommandResult(
                 text="Could not identify sender.",
