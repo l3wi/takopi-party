@@ -176,15 +176,15 @@ class PartyCommand:
         """Show help for party commands."""
         return CommandResult(
             text=(
-                "*Party Mode Commands*\n\n"
-                "`/party register <name>` - Create a new topic\n"
-                "`/party allow @user` - Allow a user to use your topic\n"
-                "`/party revoke @user` - Revoke a user's access\n"
-                "`/party leave` - Close the current topic\n"
-                "`/party topics` - List your topics\n"
-                "`/party list` - Show all party topics\n"
-                "`/party help` - Show this help message\n\n"
-                "_Use `/party register <name>` in the General topic to get started!_"
+                "<b>Party Mode Commands</b>\n\n"
+                "<code>/party register &lt;name&gt;</code> - Create a new topic\n"
+                "<code>/party allow @user</code> - Allow a user to use your topic\n"
+                "<code>/party revoke @user</code> - Revoke a user's access\n"
+                "<code>/party leave</code> - Close the current topic\n"
+                "<code>/party topics</code> - List your topics\n"
+                "<code>/party list</code> - Show all party topics\n"
+                "<code>/party help</code> - Show this help message\n\n"
+                "<i>Use /party register &lt;name&gt; in the General topic to get started!</i>"
             ),
             notify=True,
         )
@@ -216,14 +216,15 @@ class PartyCommand:
         topic_name = " ".join(ctx.args[1:]).strip() if len(ctx.args) > 1 else None
         if not topic_name:
             return CommandResult(
-                text="Please provide a topic name.\n\nUsage: `/party register <name>`",
+                text="Please provide a topic name.\n\n"
+                "Usage: <code>/party register &lt;name&gt;</code>",
                 notify=True,
             )
 
         # Check if name already exists
         if await store.topic_name_exists(topic_name):
             return CommandResult(
-                text=f"A topic named *{topic_name}* already exists.\n"
+                text=f"A topic named <b>{topic_name}</b> already exists.\n"
                 "Please choose a different name.",
                 notify=True,
             )
@@ -233,7 +234,7 @@ class PartyCommand:
         # Check workspace path doesn't collide
         if workspace_mgr.workspace_exists(workspace_path):
             return CommandResult(
-                text=f"A workspace for *{topic_name}* already exists.\n"
+                text=f"A workspace for <b>{topic_name}</b> already exists.\n"
                 "Please choose a different name.",
                 notify=True,
             )
@@ -316,7 +317,8 @@ class PartyCommand:
                 )
 
         return CommandResult(
-            text=f"Topic *{topic_name}* created and ready to use!\nWorkspace: `{workspace_path}`",
+            text=f"Topic <b>{topic_name}</b> created and ready to use!\n"
+            f"Workspace: <code>{workspace_path}</code>",
             notify=True,
         )
 
@@ -385,9 +387,9 @@ class PartyCommand:
                 notify=True,
             )
 
-        text = f"Goodbye! Topic *{topic.name}* has been closed.\n\n"
+        text = f"Goodbye! Topic <b>{topic.name}</b> has been closed.\n\n"
         if archive_path:
-            text += f"Workspace archived to: `{archive_path}`"
+            text += f"Workspace archived to: <code>{archive_path}</code>"
         else:
             text += "Workspace has been cleaned up."
 
@@ -441,7 +443,7 @@ class PartyCommand:
         if target_user_id is None:
             return CommandResult(
                 text="Please @mention the user you want to allow.\n\n"
-                "Usage: `/party allow @username`",
+                "Usage: <code>/party allow @username</code>",
                 notify=True,
             )
 
@@ -513,14 +515,15 @@ class PartyCommand:
         if target_user_id is None:
             return CommandResult(
                 text="Please @mention the user you want to revoke.\n\n"
-                "Usage: `/party revoke @username`",
+                "Usage: <code>/party revoke @username</code>",
                 notify=True,
             )
 
         # Can't revoke self
         if target_user_id == sender_id:
             return CommandResult(
-                text="You can't revoke your own access. Use `/party leave` to close the topic.",
+                text="You can't revoke your own access. "
+                "Use <code>/party leave</code> to close the topic.",
                 notify=True,
             )
 
@@ -553,13 +556,14 @@ class PartyCommand:
 
         if not topics:
             return CommandResult(
-                text="You don't have any topics yet.\nUse `/party register <name>` to create one!",
+                text="You don't have any topics yet.\n"
+                "Use <code>/party register &lt;name&gt;</code> to create one!",
                 notify=True,
             )
 
-        lines = ["*Your Topics*\n"]
+        lines = ["<b>Your Topics</b>\n"]
         for topic in sorted(topics, key=lambda t: t.name.lower()):
-            lines.append(f"- *{topic.name}*")
+            lines.append(f"• <b>{topic.name}</b>")
 
         return CommandResult(text="\n".join(lines), notify=True)
 
@@ -571,13 +575,13 @@ class PartyCommand:
         if not topics:
             return CommandResult(
                 text="No party topics registered yet.\n"
-                "Use `/party register <name>` to create the first one!",
+                "Use <code>/party register &lt;name&gt;</code> to create the first one!",
                 notify=True,
             )
 
-        lines = ["*Party Topics*\n"]
+        lines = ["<b>Party Topics</b>\n"]
         for topic in sorted(topics, key=lambda t: t.name.lower()):
-            lines.append(f"- {topic.name}")
+            lines.append(f"• {topic.name}")
 
         return CommandResult(text="\n".join(lines), notify=True)
 
