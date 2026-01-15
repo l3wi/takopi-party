@@ -5,14 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import tomli
 
 from takopi_party.plugin import (
     PartyCommand,
-    _extract_mentioned_user_id,
     _get_thread_id,
 )
 
@@ -30,7 +28,6 @@ class MockMessage:
 def make_raw_message(
     sender_id: int,
     thread_id: int | None = None,
-    mentioned_user_id: int | None = None,
 ) -> dict[str, Any]:
     """Create a mock raw Telegram message."""
     msg: dict[str, Any] = {
@@ -40,10 +37,6 @@ def make_raw_message(
     }
     if thread_id is not None:
         msg["message_thread_id"] = thread_id
-    if mentioned_user_id is not None:
-        msg["entities"] = [
-            {"type": "text_mention", "user": {"id": mentioned_user_id, "first_name": "User"}}
-        ]
     return msg
 
 
@@ -102,32 +95,6 @@ class TestHelperFunctions:
         ctx.message.raw = None
         assert _get_thread_id(ctx) is None
 
-    def test_extract_mentioned_user_id_valid(self) -> None:
-        """Test extracting mentioned user ID from valid message."""
-        raw = make_raw_message(12345, mentioned_user_id=67890)
-        user_id = _extract_mentioned_user_id(raw)
-        assert user_id == 67890
-
-    def test_extract_mentioned_user_id_none(self) -> None:
-        """Test extracting mentioned user ID from None returns None."""
-        user_id = _extract_mentioned_user_id(None)
-        assert user_id is None
-
-    def test_extract_mentioned_user_id_no_entities(self) -> None:
-        """Test extracting mentioned user ID when no entities."""
-        raw = make_raw_message(12345)
-        user_id = _extract_mentioned_user_id(raw)
-        assert user_id is None
-
-    def test_extract_mentioned_user_id_wrong_entity_type(self) -> None:
-        """Test extracting mentioned user ID with wrong entity type."""
-        raw: dict[str, Any] = {
-            "from": {"id": 12345},
-            "entities": [{"type": "bot_command", "offset": 0, "length": 5}],
-        }
-        user_id = _extract_mentioned_user_id(raw)
-        assert user_id is None
-
 
 @pytest.fixture
 def tmp_config_path(tmp_path: Path) -> Path:
@@ -162,7 +129,7 @@ class TestPartyCommand:
 
         assert result is not None
         assert "Party Mode Commands" in result.text
-        assert "/party register" in result.text
+        assert "/party" in result.text
 
     async def test_handle_default_is_help(
         self, party_command: PartyCommand, tmp_config_path: Path
@@ -174,153 +141,6 @@ class TestPartyCommand:
         assert result is not None
         assert "Party Mode Commands" in result.text
 
-    async def test_handle_register_not_in_topic_fails(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party register outside of topic fails."""
-        raw = make_raw_message(12345)  # No thread_id
-        ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-
-        result = await party_command.handle(ctx)
-
-        assert result is not None
-        assert "inside a forum topic" in result.text
-
-    async def test_handle_register_without_name_fails(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party register without name fails."""
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-
-        result = await party_command.handle(ctx)
-
-        assert result is not None
-        assert "provide a name" in result.text
-
-    async def test_handle_register_success(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party register inside topic succeeds."""
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-
-        result = await party_command.handle(ctx)
-
-        assert result is not None
-        assert "MyProject" in result.text
-        assert "registered" in result.text
-
-    async def test_handle_register_duplicate_name_fails(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party register with duplicate name fails."""
-        # First registration
-        raw1 = make_raw_message(12345, thread_id=100)
-        ctx1 = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw1,
-            workspace_base=str(workspace_base),
-        )
-        result = await party_command.handle(ctx1)
-        assert "MyProject" in result.text
-
-        # Second registration with same name in different topic
-        raw2 = make_raw_message(12345, thread_id=200)
-        ctx2 = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw2,
-            workspace_base=str(workspace_base),
-        )
-        result = await party_command.handle(ctx2)
-        assert "already exists" in result.text
-
-    async def test_handle_register_already_registered_fails(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party register in already registered topic fails."""
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-
-        # First registration succeeds
-        result = await party_command.handle(ctx)
-        assert "registered" in result.text
-
-        # Second registration in same topic fails
-        ctx2 = make_context(
-            ["register", "AnotherName"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-        result = await party_command.handle(ctx2)
-        assert "already registered" in result.text
-
-    async def test_handle_register_no_sender(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party register fails without sender info."""
-        ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=None,
-            workspace_base=str(workspace_base),
-            thread_id=100,  # In a topic but no sender
-        )
-
-        result = await party_command.handle(ctx)
-
-        assert result is not None
-        assert "Could not identify sender" in result.text
-
     async def test_handle_list_empty(
         self, party_command: PartyCommand, tmp_config_path: Path
     ) -> None:
@@ -330,42 +150,6 @@ class TestPartyCommand:
 
         assert result is not None
         assert "No party topics" in result.text
-
-    async def test_handle_list_with_topics(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party list shows registered topics."""
-        # Register a topic first
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register", "TestProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-        await party_command.handle(ctx)
-
-        # Now list
-        ctx2 = make_context(["list"], 99999, tmp_config_path)
-        result = await party_command.handle(ctx2)
-
-        assert result is not None
-        assert "TestProject" in result.text
-
-    async def test_handle_topics_empty(
-        self, party_command: PartyCommand, tmp_config_path: Path
-    ) -> None:
-        """Test /party topics with no topics for user."""
-        raw = make_raw_message(12345)
-        ctx = make_context(["topics"], 99999, tmp_config_path, raw_message=raw)
-        result = await party_command.handle(ctx)
-
-        assert result is not None
-        assert "don't have any topics" in result.text
 
     async def test_handle_leave_not_in_topic(
         self, party_command: PartyCommand, tmp_config_path: Path
@@ -378,380 +162,251 @@ class TestPartyCommand:
         assert result is not None
         assert "inside a party topic" in result.text
 
-    async def test_handle_leave_success(
+    async def test_handle_leave_not_registered_topic(
         self,
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
     ) -> None:
-        """Test /party leave unregisters topic."""
-        # Register a topic first
+        """Test /party leave in unregistered topic fails."""
         raw = make_raw_message(12345, thread_id=100)
         ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-        await party_command.handle(ctx)
-
-        # Leave the topic
-        ctx2 = make_context(
             ["leave"],
             99999,
             tmp_config_path,
             raw_message=raw,
             workspace_base=str(workspace_base),
         )
-        result = await party_command.handle(ctx2)
+        result = await party_command.handle(ctx)
+
+        assert result is not None
+        assert "not a registered party topic" in result.text
+
+    async def test_unknown_subcommand_triggers_create(
+        self,
+        party_command: PartyCommand,
+        tmp_config_path: Path,
+        workspace_base: Path,
+    ) -> None:
+        """Test that unknown subcommand (project name) triggers create flow."""
+        raw = make_raw_message(12345)
+        ctx = make_context(
+            ["myproject"],
+            99999,
+            tmp_config_path,
+            raw_message=raw,
+            workspace_base=str(workspace_base),
+        )
+        # Mock executor to avoid actual invoke_command
+        ctx.executor = MagicMock()
+        ctx.executor.invoke_command = AsyncMock(side_effect=NotImplementedError)
+        ctx.executor.send = AsyncMock()
+
+        result = await party_command.handle(ctx)
+
+        # Should fail because invoke_command not available, but should try
+        assert result is not None
+        assert "Command invocation not available" in result.text
+
+    async def test_create_checks_duplicate_name(
+        self,
+        party_command: PartyCommand,
+        tmp_config_path: Path,
+        workspace_base: Path,
+    ) -> None:
+        """Test /party <name> fails if name already exists in state."""
+        # First, manually register a topic in state
+        store = party_command._get_store(
+            make_context([], 99999, tmp_config_path, workspace_base=str(workspace_base))
+        )
+        await store.register_topic(
+            chat_id=99999,
+            thread_id=100,
+            owner_id=12345,
+            name="ExistingProject",
+            workspace_path=str(workspace_base / "existing"),
+        )
+
+        # Now try to create with same name
+        raw = make_raw_message(12345)
+        ctx = make_context(
+            ["ExistingProject"],
+            99999,
+            tmp_config_path,
+            raw_message=raw,
+            workspace_base=str(workspace_base),
+        )
+        ctx.executor = MagicMock()
+
+        result = await party_command.handle(ctx)
+
+        assert result is not None
+        assert "already exists" in result.text
+
+    async def test_create_checks_workspace_collision(
+        self,
+        party_command: PartyCommand,
+        tmp_config_path: Path,
+        workspace_base: Path,
+    ) -> None:
+        """Test /party <name> fails if workspace already exists on disk."""
+        # Create a workspace directory manually
+        (workspace_base / "myproject").mkdir()
+
+        raw = make_raw_message(12345)
+        ctx = make_context(
+            ["myproject"],
+            99999,
+            tmp_config_path,
+            raw_message=raw,
+            workspace_base=str(workspace_base),
+        )
+        ctx.executor = MagicMock()
+
+        result = await party_command.handle(ctx)
+
+        assert result is not None
+        assert "already exists" in result.text
+
+    async def test_create_requires_sender_id(
+        self,
+        party_command: PartyCommand,
+        tmp_config_path: Path,
+        workspace_base: Path,
+    ) -> None:
+        """Test /party <name> fails without sender_id."""
+        ctx = make_context(
+            ["myproject"],
+            99999,
+            tmp_config_path,
+            raw_message=None,  # No raw message, no sender
+            workspace_base=str(workspace_base),
+        )
+        ctx.executor = MagicMock()
+
+        result = await party_command.handle(ctx)
+
+        assert result is not None
+        assert "Could not identify sender" in result.text
+
+
+class TestLeaveCommand:
+    """Tests for /party leave command."""
+
+    async def test_leave_success(
+        self,
+        party_command: PartyCommand,
+        tmp_config_path: Path,
+        workspace_base: Path,
+    ) -> None:
+        """Test /party leave unregisters topic and archives workspace."""
+        # Manually set up a registered topic
+        store = party_command._get_store(
+            make_context([], 99999, tmp_config_path, workspace_base=str(workspace_base))
+        )
+
+        # Create workspace
+        project_path = workspace_base / "myproject"
+        project_path.mkdir()
+        (project_path / "README.md").write_text("test")
+
+        await store.register_topic(
+            chat_id=99999,
+            thread_id=100,
+            owner_id=12345,
+            name="MyProject",
+            workspace_path=str(project_path),
+        )
+
+        # Now leave
+        raw = make_raw_message(12345, thread_id=100)
+        ctx = make_context(
+            ["leave"],
+            99999,
+            tmp_config_path,
+            raw_message=raw,
+            workspace_base=str(workspace_base),
+        )
+
+        result = await party_command.handle(ctx)
 
         assert result is not None
         assert "unregistered" in result.text
+        assert "archived" in result.text.lower() or "cleaned up" in result.text.lower()
 
-    async def test_handle_allow_success(
+    async def test_leave_only_owner_can_leave(
         self,
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
     ) -> None:
-        """Test /party allow @user succeeds."""
-        # Register a topic first
-        raw = make_raw_message(12345, thread_id=100)
+        """Test /party leave fails if not the owner."""
+        # Manually set up a registered topic
+        store = party_command._get_store(
+            make_context([], 99999, tmp_config_path, workspace_base=str(workspace_base))
+        )
+
+        project_path = workspace_base / "myproject"
+        project_path.mkdir()
+
+        await store.register_topic(
+            chat_id=99999,
+            thread_id=100,
+            owner_id=12345,  # Owner is 12345
+            name="MyProject",
+            workspace_path=str(project_path),
+        )
+
+        # Try to leave as different user
+        raw = make_raw_message(99999, thread_id=100)  # Different sender
         ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-        await party_command.handle(ctx)
-
-        # Allow another user
-        raw_with_mention = make_raw_message(12345, thread_id=100, mentioned_user_id=67890)
-        ctx2 = make_context(
-            ["allow", "@someone"],
-            99999,
-            tmp_config_path,
-            raw_message=raw_with_mention,
-            workspace_base=str(workspace_base),
-        )
-        result = await party_command.handle(ctx2)
-
-        assert result is not None
-        assert "67890" in result.text
-        assert "can now use" in result.text
-
-    async def test_handle_allow_no_mention(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party allow without @mention fails."""
-        # Register a topic first
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-        await party_command.handle(ctx)
-
-        # Try to allow without mention
-        ctx2 = make_context(
-            ["allow"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-        result = await party_command.handle(ctx2)
-
-        assert result is not None
-        assert "@mention" in result.text
-
-    async def test_handle_revoke_success(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party revoke @user succeeds."""
-        # Register a topic first
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-        await party_command.handle(ctx)
-
-        # Allow another user
-        raw_allow = make_raw_message(12345, thread_id=100, mentioned_user_id=67890)
-        ctx_allow = make_context(
-            ["allow", "@someone"],
-            99999,
-            tmp_config_path,
-            raw_message=raw_allow,
-            workspace_base=str(workspace_base),
-        )
-        await party_command.handle(ctx_allow)
-
-        # Revoke the user
-        raw_revoke = make_raw_message(12345, thread_id=100, mentioned_user_id=67890)
-        ctx_revoke = make_context(
-            ["revoke", "@someone"],
-            99999,
-            tmp_config_path,
-            raw_message=raw_revoke,
-            workspace_base=str(workspace_base),
-        )
-        result = await party_command.handle(ctx_revoke)
-
-        assert result is not None
-        assert "67890" in result.text
-        assert "revoked" in result.text
-
-
-class TestPartyCommandIntegration:
-    """Integration tests for PartyCommand."""
-
-    async def test_multiple_projects_workflow(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test creating multiple project topics."""
-        # Create first project in topic 100
-        raw1 = make_raw_message(12345, thread_id=100)
-        ctx1 = make_context(
-            ["register", "Project1"],
-            99999,
-            tmp_config_path,
-            raw_message=raw1,
-            workspace_base=str(workspace_base),
-        )
-        result = await party_command.handle(ctx1)
-        assert "Project1" in result.text
-
-        # Create second project in topic 200
-        raw2 = make_raw_message(12345, thread_id=200)
-        ctx2 = make_context(
-            ["register", "Project2"],
-            99999,
-            tmp_config_path,
-            raw_message=raw2,
-            workspace_base=str(workspace_base),
-        )
-        result = await party_command.handle(ctx2)
-        assert "Project2" in result.text
-
-        # List user's topics
-        raw3 = make_raw_message(12345)
-        ctx3 = make_context(["topics"], 99999, tmp_config_path, raw_message=raw3)
-        result = await party_command.handle(ctx3)
-        assert "Project1" in result.text
-        assert "Project2" in result.text
-
-
-class TestConfigIntegration:
-    """Tests for takopi.toml config integration."""
-
-    async def test_register_adds_project_to_config(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party register adds project entry to takopi.toml."""
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-
-        result = await party_command.handle(ctx)
-
-        assert result is not None
-        assert "MyProject" in result.text
-        assert "registered" in result.text
-
-        # Verify config was updated
-        with tmp_config_path.open("rb") as f:
-            config = tomli.load(f)
-
-        assert "projects" in config
-        assert "party-myproject" in config["projects"]
-
-    async def test_register_project_adds_correct_key(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party register ProjectName adds correct project key."""
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register", "My Cool Project"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-
-        result = await party_command.handle(ctx)
-
-        assert result is not None
-        assert "My Cool Project" in result.text
-        assert "registered" in result.text
-
-        # Verify config
-        with tmp_config_path.open("rb") as f:
-            config = tomli.load(f)
-
-        assert "party-my-cool-project" in config["projects"]
-
-    async def test_register_auto_binds_topic(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party register auto-binds topic in takopi's state."""
-        import json
-
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-
-        await party_command.handle(ctx)
-
-        # Verify topic state was updated
-        state_path = tmp_config_path.with_name("telegram_topics_state.json")
-        with state_path.open() as f:
-            state = json.load(f)
-
-        assert "threads" in state
-        assert "99999:100" in state["threads"]  # chat_id:thread_id
-
-    async def test_leave_removes_project_from_config(
-        self,
-        party_command: PartyCommand,
-        tmp_config_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party leave removes project from takopi.toml."""
-        # Register topic
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-        await party_command.handle(ctx)
-
-        # Verify project was added
-        with tmp_config_path.open("rb") as f:
-            config = tomli.load(f)
-        assert "party-myproject" in config["projects"]
-
-        # Leave the topic
-        ctx2 = make_context(
             ["leave"],
             99999,
             tmp_config_path,
             raw_message=raw,
             workspace_base=str(workspace_base),
         )
-        result = await party_command.handle(ctx2)
+
+        result = await party_command.handle(ctx)
 
         assert result is not None
-        assert "unregistered" in result.text
+        assert "owner" in result.text.lower()
 
-        # Verify project was removed
-        with tmp_config_path.open("rb") as f:
-            config = tomli.load(f)
-        assert "party-myproject" not in config.get("projects", {})
 
-    async def test_leave_unbinds_topic(
+class TestListCommand:
+    """Tests for /party list command."""
+
+    async def test_list_shows_registered_topics(
         self,
         party_command: PartyCommand,
         tmp_config_path: Path,
         workspace_base: Path,
     ) -> None:
-        """Test /party leave removes topic binding from takopi's state."""
-        import json
-
-        # Register topic
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-        await party_command.handle(ctx)
-
-        # Verify topic was bound
-        state_path = tmp_config_path.with_name("telegram_topics_state.json")
-        with state_path.open() as f:
-            state = json.load(f)
-        assert "99999:100" in state["threads"]
-
-        # Leave the topic
-        ctx2 = make_context(
-            ["leave"],
-            99999,
-            tmp_config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
-        )
-        await party_command.handle(ctx2)
-
-        # Verify topic binding was removed
-        with state_path.open() as f:
-            state = json.load(f)
-        assert "99999:100" not in state.get("threads", {})
-
-    async def test_register_without_config_file_still_works(
-        self,
-        party_command: PartyCommand,
-        tmp_path: Path,
-        workspace_base: Path,
-    ) -> None:
-        """Test /party register works even without config file."""
-        # Use a non-existent config path
-        config_path = tmp_path / "nonexistent.toml"
-
-        raw = make_raw_message(12345, thread_id=100)
-        ctx = make_context(
-            ["register", "MyProject"],
-            99999,
-            config_path,
-            raw_message=raw,
-            workspace_base=str(workspace_base),
+        """Test /party list shows registered topics."""
+        # Manually set up some registered topics
+        store = party_command._get_store(
+            make_context([], 99999, tmp_config_path, workspace_base=str(workspace_base))
         )
 
+        await store.register_topic(
+            chat_id=99999,
+            thread_id=100,
+            owner_id=12345,
+            name="ProjectA",
+            workspace_path=str(workspace_base / "a"),
+        )
+        await store.register_topic(
+            chat_id=99999,
+            thread_id=200,
+            owner_id=12345,
+            name="ProjectB",
+            workspace_path=str(workspace_base / "b"),
+        )
+
+        # List topics
+        ctx = make_context(["list"], 99999, tmp_config_path)
         result = await party_command.handle(ctx)
 
-        # Should still succeed (config update is best-effort)
         assert result is not None
-        assert "MyProject" in result.text
-        assert "registered" in result.text
+        assert "ProjectA" in result.text
+        assert "ProjectB" in result.text

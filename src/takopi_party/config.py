@@ -188,6 +188,49 @@ def bind_topic_to_project(
     _save_topic_state(state_path, state)
 
 
+def find_thread_for_project(
+    config_path: Path,
+    chat_id: int,
+    project_key: str,
+) -> int | None:
+    """Find the thread_id for a project in takopi's topic state.
+
+    Searches the topic state file for a thread bound to the given project.
+
+    Args:
+        config_path: Path to takopi.toml (state file is in same directory)
+        chat_id: Telegram chat ID to search within
+        project_key: Project key to find
+
+    Returns:
+        The thread_id if found, None otherwise.
+    """
+    state_path = config_path.with_name(TOPIC_STATE_FILENAME)
+
+    import json
+
+    try:
+        state = _load_topic_state(state_path)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+    threads = state.get("threads", {})
+    prefix = f"{chat_id}:"
+
+    for thread_key, entry in threads.items():
+        if not thread_key.startswith(prefix):
+            continue
+        context = entry.get("context", {})
+        if context.get("project") == project_key:
+            # Extract thread_id from key "chat_id:thread_id"
+            try:
+                return int(thread_key.split(":")[1])
+            except (IndexError, ValueError):
+                continue
+
+    return None
+
+
 def unbind_topic(config_path: Path, chat_id: int, thread_id: int) -> bool:
     """Remove topic binding from takopi's topic state.
 
