@@ -259,3 +259,42 @@ def unbind_topic(config_path: Path, chat_id: int, thread_id: int) -> bool:
     del state["threads"][thread_key]
     _save_topic_state(state_path, state)
     return True
+
+
+def set_topic_trigger_mode(
+    config_path: Path,
+    chat_id: int,
+    thread_id: int,
+    mode: str,
+) -> bool:
+    """Set the trigger mode for a topic in takopi's topic state.
+
+    Args:
+        config_path: Path to takopi.toml (state file is in same directory)
+        chat_id: Telegram chat ID
+        thread_id: Forum topic thread ID
+        mode: Trigger mode ("all" or "mentions")
+
+    Returns:
+        True if trigger mode was set, False if topic not found
+    """
+    state_path = config_path.with_name(TOPIC_STATE_FILENAME)
+
+    import json
+
+    try:
+        state = _load_topic_state(state_path)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return False
+
+    thread_key = f"{chat_id}:{thread_id}"
+
+    if "threads" not in state:
+        state["threads"] = {}
+
+    if thread_key not in state["threads"]:
+        return False
+
+    state["threads"][thread_key]["trigger_mode"] = mode
+    _save_topic_state(state_path, state)
+    return True

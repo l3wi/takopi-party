@@ -13,6 +13,7 @@ from .config import (
     add_party_project,
     find_thread_for_project,
     remove_party_project,
+    set_topic_trigger_mode,
     unbind_topic,
 )
 from .state import PartyStateStore, resolve_party_state_path
@@ -258,20 +259,19 @@ class PartyCommand:
                 notify=True,
             )
 
-        # Invoke /trigger mentions in the new topic's context
-        try:
-            from takopi.context import RunContext
+        # Set trigger mode to mentions-only directly in topic state
+        trigger_set = set_topic_trigger_mode(config_path, chat_id, thread_id, "mentions")
 
-            topic_context = RunContext(project=project_key, branch="main")
-            await ctx.executor.invoke_command("trigger", "mentions", context=topic_context)
-        except (NotImplementedError, ImportError):
-            # Trigger setup failed - not fatal, topic is still usable
-            pass
+        trigger_msg = (
+            "Topic created with mentions-only trigger mode."
+            if trigger_set
+            else "Topic created (trigger mode not set)."
+        )
 
         return CommandResult(
             text=f"✓ Created project <b>{project_name}</b>!\n"
             f"Workspace: <code>{workspace_path}</code>\n"
-            f"Topic created with mentions-only trigger mode.",
+            f"{trigger_msg}",
             notify=True,
         )
 
