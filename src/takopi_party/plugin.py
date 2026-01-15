@@ -17,8 +17,6 @@ from .config import (
 from .state import PartyStateStore, resolve_party_state_path
 from .workspace import PartyWorkspaceManager, WorkspaceError
 
-DEFAULT_WORKSPACE_BASE = "/root/dev/party"
-
 
 def _get_thread_id(ctx: CommandContext) -> int | None:
     """Get thread_id from context.
@@ -73,9 +71,21 @@ class PartyCommand:
         if self._workspace is not None:
             return self._workspace
 
-        # Get workspace base from plugin config or use default
-        workspace_base = ctx.plugin_config.get("workspace_base", DEFAULT_WORKSPACE_BASE)
-        self._workspace = PartyWorkspaceManager(Path(workspace_base))
+        # Get workspace base from plugin config or default to {config_dir}/party/
+        workspace_base = ctx.plugin_config.get("workspace_base")
+        if workspace_base:
+            base_path = Path(workspace_base)
+        else:
+            # Default: create party/ folder in same directory as takopi.toml
+            config_path = ctx.config_path
+            if config_path is None:
+                raise ConfigError("Config path not available")
+            base_path = config_path.parent / "party"
+
+        # Ensure workspace base directory exists
+        base_path.mkdir(parents=True, exist_ok=True)
+
+        self._workspace = PartyWorkspaceManager(base_path)
         return self._workspace
 
     async def handle(self, ctx: CommandContext) -> CommandResult | None:

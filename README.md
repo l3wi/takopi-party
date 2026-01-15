@@ -37,20 +37,23 @@ Add the bot to your group with admin permissions:
 
 ### 3. Configure Takopi
 
-Enable config watching in your `takopi.toml` for seamless integration:
+Required configuration in your `takopi.toml`:
 
 ```toml
+transport = "telegram"
 watch_config = true
 
 [transports.telegram]
 bot_token = "YOUR_BOT_TOKEN"
 chat_id = -1001234567890  # Your supergroup chat ID
+message_overflow = "split"
 
 [transports.telegram.topics]
 enabled = true
 
-[plugins.party]
-workspace_base = "/path/to/party/workspaces"  # Where user workspaces are created
+# Optional: customize workspace location (defaults to {config_dir}/party/)
+# [plugins.party]
+# workspace_base = "/path/to/party/workspaces"
 ```
 
 ### 4. Create a Project
@@ -129,11 +132,11 @@ MyApp Topic (mentions-only)
 
 ## Configuration Reference
 
-The plugin expects these values in `ctx.plugin_config`:
+Optional configuration in `[plugins.party]`:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `workspace_base` | `str` | Path for user workspaces (default: `/root/dev/party`) |
+| `workspace_base` | `str` | Path for user workspaces (default: `{config_dir}/party/`) |
 
 ## Architecture
 
