@@ -7,6 +7,7 @@ from pathlib import Path
 
 from takopi.commands import CommandContext, CommandResult
 from takopi.config import ConfigError
+from takopi.transport import RenderedMessage
 
 from .config import (
     add_party_project,
@@ -16,6 +17,11 @@ from .config import (
 )
 from .state import PartyStateStore, resolve_party_state_path
 from .workspace import PartyWorkspaceManager, WorkspaceError
+
+
+def _html(text: str) -> RenderedMessage:
+    """Wrap text in a RenderedMessage with HTML parse mode."""
+    return RenderedMessage(text=text, extra={"parse_mode": "HTML"})
 
 
 def _get_thread_id(ctx: CommandContext) -> int | None:
@@ -181,7 +187,7 @@ class PartyCommand:
             )
 
         # Send progress: creating workspace
-        await ctx.executor.send(f"Creating project <b>{project_name}</b>...")
+        await ctx.executor.send(_html(f"Creating project <b>{project_name}</b>..."))
 
         # Create workspace with git init
         try:
@@ -200,7 +206,7 @@ class PartyCommand:
             )
 
         # Send progress: creating topic
-        await ctx.executor.send("Creating topic...")
+        await ctx.executor.send(_html("Creating topic..."))
 
         # Invoke /topic to create Telegram forum topic
         try:
@@ -231,7 +237,7 @@ class PartyCommand:
             )
 
         # Send progress: setting up permissions
-        await ctx.executor.send("Setting up permissions...")
+        await ctx.executor.send(_html("Setting up permissions..."))
 
         # Register topic in party state
         try:
