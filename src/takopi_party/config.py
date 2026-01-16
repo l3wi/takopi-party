@@ -39,7 +39,7 @@ def _make_project_key(name: str) -> str:
         sanitized = sanitized.replace("--", "-")
     sanitized = sanitized.strip("-")
 
-    return f"party-{sanitized}"
+    return sanitized
 
 
 def add_party_project(

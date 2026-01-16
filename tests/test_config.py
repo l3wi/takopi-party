@@ -19,39 +19,39 @@ class TestMakeProjectKey:
     """Tests for _make_project_key function."""
 
     def test_simple_name(self):
-        """Simple names get party- prefix."""
+        """Simple names are lowercased."""
         result = _make_project_key("MyProject")
-        assert result == "party-myproject"
+        assert result == "myproject"
 
     def test_name_with_spaces(self):
         """Spaces are converted to hyphens."""
         result = _make_project_key("My Project")
-        assert result == "party-my-project"
+        assert result == "my-project"
 
     def test_name_with_underscores(self):
         """Underscores are converted to hyphens."""
         result = _make_project_key("my_project")
-        assert result == "party-my-project"
+        assert result == "my-project"
 
     def test_name_with_special_chars(self):
         """Special characters are removed."""
         result = _make_project_key("Project@#$123!")
-        assert result == "party-project123"
+        assert result == "project123"
 
     def test_consecutive_hyphens_collapsed(self):
         """Multiple consecutive hyphens are collapsed to one."""
         result = _make_project_key("a   b")
-        assert result == "party-a-b"
+        assert result == "a-b"
 
     def test_leading_trailing_hyphens_stripped(self):
         """Leading and trailing hyphens are stripped."""
         result = _make_project_key("-test-")
-        assert result == "party-test"
+        assert result == "test"
 
     def test_unicode_name(self):
         """Unicode characters are handled."""
         result = _make_project_key("Test123")
-        assert result == "party-test123"
+        assert result == "test123"
 
 
 class TestGetPartyProjectKey:
@@ -75,16 +75,16 @@ class TestAddPartyProject:
 
         project_key = add_party_project(config_path, workspace_path, "TestProject")
 
-        assert project_key == "party-testproject"
+        assert project_key == "testproject"
 
         # Verify config was updated
         with config_path.open("rb") as f:
             config = tomli.load(f)
 
         assert "projects" in config
-        assert "party-testproject" in config["projects"]
-        assert config["projects"]["party-testproject"]["path"] == str(workspace_path)
-        assert config["projects"]["party-testproject"]["default_engine"] == "claude"
+        assert "testproject" in config["projects"]
+        assert config["projects"]["testproject"]["path"] == str(workspace_path)
+        assert config["projects"]["testproject"]["default_engine"] == "claude"
 
     def test_adds_project_to_existing_projects(self, tmp_path: Path):
         """Adds project to config with existing projects."""
@@ -102,21 +102,21 @@ path = "/some/path"
 
         project_key = add_party_project(config_path, workspace_path, "NewProject")
 
-        assert project_key == "party-newproject"
+        assert project_key == "newproject"
 
         with config_path.open("rb") as f:
             config = tomli.load(f)
 
         # Both projects should exist
         assert "existing" in config["projects"]
-        assert "party-newproject" in config["projects"]
+        assert "newproject" in config["projects"]
 
     def test_raises_on_duplicate_key(self, tmp_path: Path):
         """Raises ValueError if project key already exists."""
         config_path = tmp_path / "takopi.toml"
         config_path.write_text(
             """
-[projects.party-test]
+[projects.test]
 path = "/existing"
 """
         )
@@ -143,7 +143,7 @@ class TestRemovePartyProject:
         config_path = tmp_path / "takopi.toml"
         config_path.write_text(
             """
-[projects.party-test]
+[projects.test]
 path = "/some/path"
 
 [projects.other]
@@ -158,7 +158,7 @@ path = "/other/path"
         with config_path.open("rb") as f:
             config = tomli.load(f)
 
-        assert "party-test" not in config["projects"]
+        assert "test" not in config["projects"]
         assert "other" in config["projects"]
 
     def test_returns_false_if_not_found(self, tmp_path: Path):
