@@ -187,7 +187,7 @@ class PartyCommand:
                 notify=True,
             )
 
-        # Send progress: creating workspace
+        # Send initial progress message
         await ctx.executor.send(_html(f"Creating project <b>{project_name}</b>..."))
 
         # Create workspace with git init
@@ -205,9 +205,6 @@ class PartyCommand:
                 text=f"Failed to add project to config: {exc}",
                 notify=True,
             )
-
-        # Send progress: creating topic
-        await ctx.executor.send(_html("Creating topic..."))
 
         # Invoke /topic to create Telegram forum topic
         try:
@@ -237,9 +234,6 @@ class PartyCommand:
                 notify=True,
             )
 
-        # Send progress: setting up permissions
-        await ctx.executor.send(_html("Setting up permissions..."))
-
         # Register topic in party state
         try:
             await store.register_topic(
@@ -260,18 +254,10 @@ class PartyCommand:
             )
 
         # Set trigger mode to mentions-only directly in topic state
-        trigger_set = set_topic_trigger_mode(config_path, chat_id, thread_id, "mentions")
-
-        trigger_msg = (
-            "Topic created with mentions-only trigger mode."
-            if trigger_set
-            else "Topic created (trigger mode not set)."
-        )
+        set_topic_trigger_mode(config_path, chat_id, thread_id, "mentions")
 
         return CommandResult(
-            text=f"✓ Created project <b>{project_name}</b>!\n"
-            f"Workspace: <code>{workspace_path}</code>\n"
-            f"{trigger_msg}",
+            text=f"Created <b>{project_name}</b>\n<code>{workspace_path}</code>",
             notify=True,
         )
 

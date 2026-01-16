@@ -220,7 +220,9 @@ def find_thread_for_project(
     for thread_key, entry in threads.items():
         if not thread_key.startswith(prefix):
             continue
-        context = entry.get("context", {})
+        context = entry.get("context")
+        if context is None:
+            continue
         if context.get("project") == project_key:
             # Extract thread_id from key "chat_id:thread_id"
             try:
