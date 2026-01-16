@@ -98,7 +98,8 @@ class PartyCommand:
     async def handle(self, ctx: CommandContext) -> CommandResult | None:
         """Handle the /party command."""
         if not ctx.args:
-            return await self._handle_help(ctx)
+            await self._handle_help(ctx)
+            return None
 
         subcommand = ctx.args[0].lower()
 
@@ -111,38 +112,34 @@ class PartyCommand:
 
         if subcommand in handlers:
             try:
-                return await handlers[subcommand](ctx)
+                await handlers[subcommand](ctx)
             except ConfigError as exc:
-                return CommandResult(
-                    text=f"Configuration error: {exc}",
-                    notify=True,
-                )
+                await ctx.executor.send(f"Configuration error: {exc}", reply_to=ctx.message)
+            return None
 
         # Not a known subcommand - treat entire args as project name
         # e.g., /party myproject -> create project "myproject"
         project_name = " ".join(ctx.args).strip()
         try:
-            return await self._handle_create(ctx, project_name)
+            await self._handle_create(ctx, project_name)
         except ConfigError as exc:
-            return CommandResult(
-                text=f"Configuration error: {exc}",
-                notify=True,
-            )
+            await ctx.executor.send(f"Configuration error: {exc}", reply_to=ctx.message)
+        return None
 
-    async def _handle_help(self, ctx: CommandContext) -> CommandResult:
+    async def _handle_help(self, ctx: CommandContext) -> None:
         """Show help for party commands."""
-        return CommandResult(
-            text=(
+        await ctx.executor.send(
+            _html(
                 "<b>Party Mode Commands</b>\n\n"
                 "<code>/party &lt;name&gt;</code> - Create a new project with topic\n"
                 "<code>/party leave</code> - Unregister the current topic\n"
                 "<code>/party list</code> - Show all party topics\n"
                 "<code>/party help</code> - Show this help message"
             ),
-            notify=True,
+            reply_to=ctx.message,
         )
 
-    async def _handle_create(self, ctx: CommandContext, project_name: str) -> CommandResult:
+    async def _handle_create(self, ctx: CommandContext, project_name: str) -> None:
         """Create a new party project with topic and triggers.
 
         This command:
@@ -155,37 +152,42 @@ class PartyCommand:
 
         sender_id = ctx.message.sender_id
         if sender_id is None:
-            return CommandResult(text="Could not identify sender.", notify=True)
+            await ctx.executor.send("Could not identify sender.", reply_to=ctx.message)
+            return
 
         chat_id = ctx.message.channel_id
         if not isinstance(chat_id, int):
-            return CommandResult(
-                text="Party mode only works in Telegram group chats.",
-                notify=True,
+            await ctx.executor.send(
+                "Party mode only works in Telegram group chats.",
+                reply_to=ctx.message,
             )
+            return
 
         config_path = ctx.config_path
         if config_path is None:
-            return CommandResult(text="Config path not available.", notify=True)
+            await ctx.executor.send("Config path not available.", reply_to=ctx.message)
+            return
 
         store = self._get_store(ctx)
         workspace_mgr = self._get_workspace_manager(ctx)
 
         # Check if name already exists in party state
         if await store.topic_name_exists(project_name):
-            return CommandResult(
-                text=f"A topic named <b>{project_name}</b> already exists.",
-                notify=True,
+            await ctx.executor.send(
+                _html(f"A topic named <b>{project_name}</b> already exists."),
+                reply_to=ctx.message,
             )
+            return
 
         workspace_path = workspace_mgr.project_workspace_path(project_name)
 
         # Check workspace path doesn't collide
         if workspace_mgr.workspace_exists(workspace_path):
-            return CommandResult(
-                text=f"A workspace for <b>{project_name}</b> already exists.",
-                notify=True,
+            await ctx.executor.send(
+                _html(f"A workspace for <b>{project_name}</b> already exists."),
+                reply_to=ctx.message,
             )
+            return
 
         # Send initial progress message
         await ctx.executor.send(_html(f"Creating project <b>{project_name}</b>..."))
@@ -194,17 +196,16 @@ class PartyCommand:
         try:
             workspace_mgr.create_workspace(workspace_path, project_name, sender_id)
         except WorkspaceError as exc:
-            return CommandResult(text=f"Failed to create workspace: {exc}", notify=True)
+            await ctx.executor.send(f"Failed to create workspace: {exc}", reply_to=ctx.message)
+            return
 
         # Add to takopi.toml
         try:
             project_key = add_party_project(config_path, workspace_path, project_name)
         except (FileNotFoundError, ValueError) as exc:
             workspace_mgr.cleanup_workspace(workspace_path, archive=False)
-            return CommandResult(
-                text=f"Failed to add project to config: {exc}",
-                notify=True,
-            )
+            await ctx.executor.send(f"Failed to add project to config: {exc}", reply_to=ctx.message)
+            return
 
         # Wait for takopi to reload config (watch_config polls for changes)
         await asyncio.sleep(1.0)
@@ -216,11 +217,14 @@ class PartyCommand:
             # invoke_command not available - clean up and suggest manual flow
             workspace_mgr.cleanup_workspace(workspace_path, archive=False)
             remove_party_project(config_path, project_name)
-            return CommandResult(
-                text="Command invocation not available. Please create a topic manually "
-                "and use <code>/party register</code> instead.",
-                notify=True,
+            await ctx.executor.send(
+                _html(
+                    "Command invocation not available. Please create a topic manually "
+                    "and use <code>/party register</code> instead."
+                ),
+                reply_to=ctx.message,
             )
+            return
 
         # Wait for topic state to be written, then find the thread_id
         await asyncio.sleep(1.5)
@@ -231,11 +235,14 @@ class PartyCommand:
             # Clean up and report partial failure
             workspace_mgr.cleanup_workspace(workspace_path, archive=False)
             remove_party_project(config_path, project_name)
-            return CommandResult(
-                text="Failed to create topic. Please try again or use "
-                "<code>/party register</code> inside an existing topic.",
-                notify=True,
+            await ctx.executor.send(
+                _html(
+                    "Failed to create topic. Please try again or use "
+                    "<code>/party register</code> inside an existing topic."
+                ),
+                reply_to=ctx.message,
             )
+            return
 
         # Register topic in party state
         try:
@@ -251,58 +258,54 @@ class PartyCommand:
             # Leave topic but clean up workspace
             workspace_mgr.cleanup_workspace(workspace_path, archive=False)
             remove_party_project(config_path, project_name)
-            return CommandResult(
-                text=f"Topic created but registration failed: {exc}",
-                notify=True,
+            await ctx.executor.send(
+                f"Topic created but registration failed: {exc}", reply_to=ctx.message
             )
+            return
 
         # Set trigger mode to mentions-only directly in topic state
         set_topic_trigger_mode(config_path, chat_id, thread_id, "mentions")
 
-        return CommandResult(
-            text=f"Created <b>{project_name}</b>\n<code>{workspace_path}</code>",
-            notify=True,
+        await ctx.executor.send(
+            _html(f"Created <b>{project_name}</b>\n<code>{workspace_path}</code>"),
+            reply_to=ctx.message,
         )
 
-    async def _handle_leave(self, ctx: CommandContext) -> CommandResult:
+    async def _handle_leave(self, ctx: CommandContext) -> None:
         """Unregister the current topic."""
         sender_id = ctx.message.sender_id
         if sender_id is None:
-            return CommandResult(
-                text="Could not identify sender.",
-                notify=True,
-            )
+            await ctx.executor.send("Could not identify sender.", reply_to=ctx.message)
+            return
 
         thread_id = _get_thread_id(ctx)
         if thread_id is None:
-            return CommandResult(
-                text="This command must be used inside a party topic.",
-                notify=True,
+            await ctx.executor.send(
+                "This command must be used inside a party topic.", reply_to=ctx.message
             )
+            return
 
         chat_id = ctx.message.channel_id
         if not isinstance(chat_id, int):
-            return CommandResult(
-                text="Party mode only works in Telegram group chats.",
-                notify=True,
+            await ctx.executor.send(
+                "Party mode only works in Telegram group chats.", reply_to=ctx.message
             )
+            return
 
         store = self._get_store(ctx)
         workspace_mgr = self._get_workspace_manager(ctx)
 
         topic = await store.get_topic_by_thread(chat_id, thread_id)
         if topic is None:
-            return CommandResult(
-                text="This is not a registered party topic.",
-                notify=True,
-            )
+            await ctx.executor.send("This is not a registered party topic.", reply_to=ctx.message)
+            return
 
         # Check if sender owns this topic
         if topic.owner_id != sender_id:
-            return CommandResult(
-                text="Only the topic owner can unregister this topic.",
-                notify=True,
+            await ctx.executor.send(
+                "Only the topic owner can unregister this topic.", reply_to=ctx.message
             )
+            return
 
         # Unregister topic
         await store.unregister_topic(thread_id)
@@ -320,10 +323,11 @@ class PartyCommand:
         try:
             archive_path = workspace_mgr.cleanup_workspace(workspace_path, archive=True)
         except WorkspaceError as exc:
-            return CommandResult(
-                text=f"Topic unregistered, but workspace archival failed: {exc}",
-                notify=True,
+            await ctx.executor.send(
+                f"Topic unregistered, but workspace archival failed: {exc}",
+                reply_to=ctx.message,
             )
+            return
 
         text = f"Topic <b>{topic.name}</b> has been unregistered.\n\n"
         if archive_path:
@@ -331,25 +335,28 @@ class PartyCommand:
         else:
             text += "Workspace has been cleaned up."
 
-        return CommandResult(text=text, notify=True)
+        await ctx.executor.send(_html(text), reply_to=ctx.message)
 
-    async def _handle_list(self, ctx: CommandContext) -> CommandResult:
+    async def _handle_list(self, ctx: CommandContext) -> None:
         """List all registered party topics."""
         store = self._get_store(ctx)
         topics = await store.list_topics()
 
         if not topics:
-            return CommandResult(
-                text="No party topics registered yet.\n"
-                "Use <code>/party &lt;name&gt;</code> to create one!",
-                notify=True,
+            await ctx.executor.send(
+                _html(
+                    "No party topics registered yet.\n"
+                    "Use <code>/party &lt;name&gt;</code> to create one!"
+                ),
+                reply_to=ctx.message,
             )
+            return
 
         lines = ["<b>Party Topics</b>\n"]
         for topic in sorted(topics, key=lambda t: t.name.lower()):
             lines.append(f"• {topic.name}")
 
-        return CommandResult(text="\n".join(lines), notify=True)
+        await ctx.executor.send(_html("\n".join(lines)), reply_to=ctx.message)
 
 
 BACKEND = PartyCommand()

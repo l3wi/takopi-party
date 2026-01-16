@@ -68,6 +68,8 @@ def make_context(
     ctx.plugin_config = {
         "workspace_base": workspace_base,
     }
+    # Make executor.send an async mock
+    ctx.executor.send = AsyncMock()
     return ctx
 
 
@@ -127,9 +129,11 @@ class TestPartyCommand:
         ctx = make_context(["help"], 99999, tmp_config_path)
         result = await party_command.handle(ctx)
 
-        assert result is not None
-        assert "Party Mode Commands" in result.text
-        assert "/party" in result.text
+        assert result is None
+        ctx.executor.send.assert_called_once()
+        sent_msg = ctx.executor.send.call_args[0][0]
+        assert "Party Mode Commands" in sent_msg.text
+        assert "/party" in sent_msg.text
 
     async def test_handle_default_is_help(
         self, party_command: PartyCommand, tmp_config_path: Path
@@ -138,8 +142,10 @@ class TestPartyCommand:
         ctx = make_context([], 99999, tmp_config_path)
         result = await party_command.handle(ctx)
 
-        assert result is not None
-        assert "Party Mode Commands" in result.text
+        assert result is None
+        ctx.executor.send.assert_called_once()
+        sent_msg = ctx.executor.send.call_args[0][0]
+        assert "Party Mode Commands" in sent_msg.text
 
     async def test_handle_list_empty(
         self, party_command: PartyCommand, tmp_config_path: Path
@@ -148,8 +154,10 @@ class TestPartyCommand:
         ctx = make_context(["list"], 99999, tmp_config_path)
         result = await party_command.handle(ctx)
 
-        assert result is not None
-        assert "No party topics" in result.text
+        assert result is None
+        ctx.executor.send.assert_called_once()
+        sent_msg = ctx.executor.send.call_args[0][0]
+        assert "No party topics" in sent_msg.text
 
     async def test_handle_leave_not_in_topic(
         self, party_command: PartyCommand, tmp_config_path: Path
@@ -159,8 +167,10 @@ class TestPartyCommand:
         ctx = make_context(["leave"], 99999, tmp_config_path, raw_message=raw)
         result = await party_command.handle(ctx)
 
-        assert result is not None
-        assert "inside a party topic" in result.text
+        assert result is None
+        ctx.executor.send.assert_called_once()
+        sent_msg = ctx.executor.send.call_args[0][0]
+        assert "inside a party topic" in sent_msg
 
     async def test_handle_leave_not_registered_topic(
         self,
@@ -179,8 +189,10 @@ class TestPartyCommand:
         )
         result = await party_command.handle(ctx)
 
-        assert result is not None
-        assert "not a registered party topic" in result.text
+        assert result is None
+        ctx.executor.send.assert_called_once()
+        sent_msg = ctx.executor.send.call_args[0][0]
+        assert "not a registered party topic" in sent_msg
 
     async def test_unknown_subcommand_triggers_create(
         self,
@@ -198,15 +210,16 @@ class TestPartyCommand:
             workspace_base=str(workspace_base),
         )
         # Mock executor to avoid actual invoke_command
-        ctx.executor = MagicMock()
         ctx.executor.invoke_command = AsyncMock(side_effect=NotImplementedError)
-        ctx.executor.send = AsyncMock()
 
         result = await party_command.handle(ctx)
 
         # Should fail because invoke_command not available, but should try
-        assert result is not None
-        assert "Command invocation not available" in result.text
+        assert result is None
+        # Check last send call contains the error message
+        last_call = ctx.executor.send.call_args_list[-1]
+        sent_msg = last_call[0][0]
+        assert "Command invocation not available" in sent_msg.text
 
     async def test_create_checks_duplicate_name(
         self,
@@ -236,12 +249,13 @@ class TestPartyCommand:
             raw_message=raw,
             workspace_base=str(workspace_base),
         )
-        ctx.executor = MagicMock()
 
         result = await party_command.handle(ctx)
 
-        assert result is not None
-        assert "already exists" in result.text
+        assert result is None
+        ctx.executor.send.assert_called_once()
+        sent_msg = ctx.executor.send.call_args[0][0]
+        assert "already exists" in sent_msg.text
 
     async def test_create_checks_workspace_collision(
         self,
@@ -261,12 +275,13 @@ class TestPartyCommand:
             raw_message=raw,
             workspace_base=str(workspace_base),
         )
-        ctx.executor = MagicMock()
 
         result = await party_command.handle(ctx)
 
-        assert result is not None
-        assert "already exists" in result.text
+        assert result is None
+        ctx.executor.send.assert_called_once()
+        sent_msg = ctx.executor.send.call_args[0][0]
+        assert "already exists" in sent_msg.text
 
     async def test_create_requires_sender_id(
         self,
@@ -282,12 +297,13 @@ class TestPartyCommand:
             raw_message=None,  # No raw message, no sender
             workspace_base=str(workspace_base),
         )
-        ctx.executor = MagicMock()
 
         result = await party_command.handle(ctx)
 
-        assert result is not None
-        assert "Could not identify sender" in result.text
+        assert result is None
+        ctx.executor.send.assert_called_once()
+        sent_msg = ctx.executor.send.call_args[0][0]
+        assert "Could not identify sender" in sent_msg
 
 
 class TestLeaveCommand:
@@ -330,9 +346,11 @@ class TestLeaveCommand:
 
         result = await party_command.handle(ctx)
 
-        assert result is not None
-        assert "unregistered" in result.text
-        assert "archived" in result.text.lower() or "cleaned up" in result.text.lower()
+        assert result is None
+        ctx.executor.send.assert_called_once()
+        sent_msg = ctx.executor.send.call_args[0][0]
+        assert "unregistered" in sent_msg.text
+        assert "archived" in sent_msg.text.lower() or "cleaned up" in sent_msg.text.lower()
 
     async def test_leave_only_owner_can_leave(
         self,
@@ -369,8 +387,10 @@ class TestLeaveCommand:
 
         result = await party_command.handle(ctx)
 
-        assert result is not None
-        assert "owner" in result.text.lower()
+        assert result is None
+        ctx.executor.send.assert_called_once()
+        sent_msg = ctx.executor.send.call_args[0][0]
+        assert "owner" in sent_msg.lower()
 
 
 class TestListCommand:
@@ -407,6 +427,8 @@ class TestListCommand:
         ctx = make_context(["list"], 99999, tmp_config_path)
         result = await party_command.handle(ctx)
 
-        assert result is not None
-        assert "ProjectA" in result.text
-        assert "ProjectB" in result.text
+        assert result is None
+        ctx.executor.send.assert_called_once()
+        sent_msg = ctx.executor.send.call_args[0][0]
+        assert "ProjectA" in sent_msg.text
+        assert "ProjectB" in sent_msg.text
