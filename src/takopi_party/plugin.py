@@ -206,6 +206,9 @@ class PartyCommand:
                 notify=True,
             )
 
+        # Wait for takopi to reload config (watch_config polls for changes)
+        await asyncio.sleep(1.0)
+
         # Invoke /topic to create Telegram forum topic
         try:
             await ctx.executor.invoke_command("topic", f"{project_key} @main")
